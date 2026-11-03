@@ -9,7 +9,7 @@ import 'package:meta/meta.dart';
 /// Everything a transport needs to bind.
 ///
 /// This is a plain value object so a transport implementation can stay in its
-/// own layer (HTTP in the follow-up PR) without importing runtime internals.
+/// own layer without importing runtime internals.
 @immutable
 final class ReleaseTransportStartRequest {
   const ReleaseTransportStartRequest({
@@ -19,6 +19,7 @@ final class ReleaseTransportStartRequest {
     required this.requestTimeout,
     required this.maxRequestBytes,
     required this.maxConcurrentRequests,
+    required this.accessToken,
   });
 
   /// Interface to bind.
@@ -39,6 +40,14 @@ final class ReleaseTransportStartRequest {
   /// In-flight request ceiling.
   final int maxConcurrentRequests;
 
+  /// Bearer secret every request must present.
+  ///
+  /// A transport must reject anything else before dispatch, must compare in
+  /// constant time, and must never write this value to a log or echo it in a
+  /// response.
+  final String accessToken;
+
+  /// Same fields as [toJson], but with the secret redacted — safe to log.
   Map<String, Object?> toJson() => <String, Object?>{
     'host': host,
     'port': port,
@@ -46,15 +55,16 @@ final class ReleaseTransportStartRequest {
     'requestTimeoutMs': requestTimeout.inMilliseconds,
     'maxRequestBytes': maxRequestBytes,
     'maxConcurrentRequests': maxConcurrentRequests,
+    'accessToken': '<redacted>',
   };
 }
 
 /// The seam between the runtime's lifecycle and an actual listener.
 ///
 /// The runtime owns state, permissions, and (later) tools; a transport owns
-/// sockets, request parsing, auth, and timeouts. Keeping them apart is what
-/// lets PR-01 ship without any socket code and lets the HTTP transport land in
-/// PR-02 as a drop-in.
+/// sockets, request parsing, auth, and timeouts. Keeping them apart is what let
+/// PR-01 ship without any socket code and lets the HTTP transport
+/// ([HttpReleaseRuntimeTransport]) land as a drop-in.
 ///
 /// Contract:
 /// - [start] is called only from `ReleaseMcpRuntime.start()` after the

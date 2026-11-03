@@ -10,14 +10,16 @@ import 'config/release_mcp_config.dart';
 import 'errors/release_mcp_error.dart';
 import 'lifecycle/runtime_lifecycle.dart';
 import 'lifecycle/runtime_status.dart';
+import 'security/access_token.dart';
 import 'security/permissions.dart';
+import 'server/http_transport.dart';
 import 'transport/runtime_transport.dart';
 
 /// Opt-in MCP runtime for shipped Flutter apps.
 ///
-/// Responsibilities in this PR: configuration, lifecycle, consent, and the
-/// transport seam. No MCP tools, no HTTP, no VM Service, no Dart eval: those
-/// arrive in the follow-up PRs described in
+/// Responsibilities: configuration, lifecycle, consent, bearer
+/// authentication, and the transport seam. The tool catalog, semantic
+/// snapshots, and guarded interactions arrive in the follow-up PRs described in
 /// `docs/release_runtime/README.md`.
 ///
 /// Guarantees:
@@ -29,18 +31,36 @@ import 'transport/runtime_transport.dart';
 ///   [ReleaseRuntimeStatus.errorCode].
 /// - A session is read-only unless the caller passes explicit
 ///   [ReleaseStartAuthorization] grants.
+/// - Every request must present [accessToken]; nothing is served without it.
 final class ReleaseMcpRuntime {
   ReleaseMcpRuntime({
     this.config = const ReleaseMcpConfig(),
     ReleaseRuntimeTransport? transport,
-  }) : _transport = transport ?? const InertRuntimeTransport() {
+    ReleaseAccessToken? accessToken,
+  }) : _transport = transport ?? const InertRuntimeTransport(),
+       _accessToken = accessToken ?? ReleaseAccessToken.generate() {
     _lifecycle = ReleaseRuntimeLifecycle();
   }
+
+  /// Runtime backed by the Streamable HTTP transport.
+  ///
+  /// This is the release-ready shape: a loopback HTTP MCP endpoint with bearer
+  /// authentication, Origin validation, and request bounds taken from [config].
+  /// Nothing listens until [start] is called.
+  factory ReleaseMcpRuntime.http({
+    ReleaseMcpConfig config = const ReleaseMcpConfig(),
+    ReleaseAccessToken? accessToken,
+  }) => ReleaseMcpRuntime(
+    config: config,
+    transport: HttpReleaseRuntimeTransport(),
+    accessToken: accessToken,
+  );
 
   /// Configuration the runtime was built with.
   final ReleaseMcpConfig config;
 
   final ReleaseRuntimeTransport _transport;
+  ReleaseAccessToken _accessToken;
   late final ReleaseRuntimeLifecycle _lifecycle;
   final StreamController<ReleaseRuntimeStatus> _statusChanges =
       StreamController<ReleaseRuntimeStatus>.broadcast();
@@ -61,6 +81,13 @@ final class ReleaseMcpRuntime {
 
   /// True once [dispose] has run.
   bool get isDisposed => _disposed;
+
+  /// The bearer secret a client must present.
+  ///
+  /// Surface it to the user (a pairing code in your settings screen) and hand
+  /// it to the client out of band. Its `toString` is redacted, but the `value`
+  /// is the secret: do not log it, and never put it in a URL.
+  ReleaseAccessToken get accessToken => _accessToken;
 
   /// Read-only snapshot of the runtime.
   ReleaseRuntimeStatus get status => ReleaseRuntimeStatus(
@@ -126,6 +153,7 @@ final class ReleaseMcpRuntime {
           requestTimeout: config.requestTimeout,
           maxRequestBytes: config.maxRequestBytes,
           maxConcurrentRequests: config.maxConcurrentRequests,
+          accessToken: _accessToken.value,
         ),
       );
 
@@ -213,6 +241,26 @@ final class ReleaseMcpRuntime {
     _granted = _granted.difference(revoked);
     _emitStatus();
     return status;
+  });
+
+  /// Issues a new [accessToken].
+  ///
+  /// Only while stopped: the transport captured the previous token when it
+  /// bound, so rotation is `stop()` → `rotateAccessToken()` → `start()`. The
+  /// alternative — rebinding under a live client — would either keep the old
+  /// secret alive or silently break the endpoint. Throws
+  /// `invalid_state_transition` while starting, running, or stopping.
+  Future<ReleaseAccessToken> rotateAccessToken() => _serialize(() async {
+    _ensureNotDisposed();
+    if (_lifecycle.state != ReleaseRuntimeState.disabled) {
+      throw ReleaseMcpException(
+        ReleaseMcpErrorCode.invalidStateTransition,
+        details: <String, Object?>{'reason': 'rotation_requires_stopped'},
+      );
+    }
+    _accessToken = ReleaseAccessToken.generate();
+    _emitStatus();
+    return _accessToken;
   });
 
   /// Tears the runtime down, releasing the transport and closing streams.

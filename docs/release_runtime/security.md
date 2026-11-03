@@ -1,37 +1,48 @@
 # Release runtime security model
 
-Status: the defaults below are **implemented** in PR-01; the wire-level controls
-(authentication, Origin checks, rate limiting) are **required before PR-02 may
-listen** and are listed so the gap stays explicit.
+Status: the controls below are **implemented** in PR-01/PR-02 and covered by
+tests. The gaps that must close before an Android release build is called
+"verified" are listed separately — they are not silently assumed.
 
-## Implemented (PR-01)
+## Implemented
 
 | Control | Implementation |
 |---|---|
 | Off by default | Construction binds nothing; `start()` is an explicit call. |
 | Loopback-only | `ReleaseMcpConfig.validate()` rejects non-loopback hosts unless `allowNonLoopbackBinding` is set. |
+| Bearer auth on every request | `HttpReleaseRuntimeTransport` passes `authToken` to the SDK transport, which answers 401 before dispatch. Loopback is *not* treated as a trust boundary. |
+| Constant-time comparison | SDK `_validateBearerToken` + `ReleaseAccessToken.matches`; no byte-by-byte early exit. |
+| Token entropy and handling | 256 bits from `Random.secure()`; header-only (never a query string); `toString()` redacted; excluded from `status`/`config`/`details` JSON; `ReleaseTransportStartRequest.toJson()` redacts it. |
+| Token rotation | `rotateAccessToken()` while stopped; the old token is refused after restart (tested). |
+| Origin validation | SDK loopback allow-list, `allowAnyOrigin: false`; foreign `Origin` → 403 (tested). |
+| No wildcard CORS | `CorsConfig(allowOrigin: 'http://<host>')`. |
+| No silent rebinding | `fallbackPorts: const []`; a taken port is a failed start (tested). |
+| Request bounds | Body ceiling, per-request timeout, and max sessions come from config; SDK enforces. |
 | Read-only session | Only `ui:read` is granted implicitly; interaction, capture, and app actions need consent. |
 | No silent downgrade | `readOnlyByDefault: false` + missing authorization → `authorization_missing`. |
-| Consent withdrawal | `revokePermissions()`; `ui:read` is structural, so end the session with `stop()` instead. |
-| No secret leakage | Errors carry codes, field names, and error *types* only; `status`/`config` JSON has no token field. |
-| Bounded surface | Request size, timeout, and concurrency ceilings live in config and are validated. |
+| Consent withdrawal | `revokePermissions()`; `ui:read` is structural, so end the session with `stop()`. |
+| No secret leakage in errors | Messages are fixed per code; details carry field names and error *types* only. |
 | No debug capabilities | No eval, no hot reload, no arbitrary file IO, no shell — absent by construction, not by policy. |
 
-## Required before the runtime listens (PR-02)
+## Still required before a device build may listen (PR-03+ / PR-06)
 
-- **Authentication on every request.** Loopback is not a trust boundary: other
-  apps on the device can reach `127.0.0.1`. Token generated from a cryptographic
-  RNG, rotated/revocable, stored in Android Keystore-backed storage where
-  available, **never** compiled into the APK and never logged.
-- **Header-only credentials.** Never accept the token via query string; redact it
-  from the audit log.
-- **Origin and Host validation** for Streamable HTTP, plus `Content-Type` and
-  body/header consistency checks. No wildcard CORS; no LAN or public binding by
-  default.
-- **Rate limiting and timeouts** enforced by the transport, mapped onto the
-  error codes already defined here (`transport_start_failed` is not a substitute
-  for a per-request 429/408).
-- **Audit log** of tool calls with argument *shapes*, not values.
+- **Keystore-backed token storage.** The token lives in memory today. Persisting
+  it across launches (so a client does not need a new pairing code every start)
+  needs an Android Keystore-backed store behind a small interface; a plain
+  `SharedPreferences` write would put the secret in app-readable storage.
+- **Revocation UI semantics.** Rotation is stop → rotate → start; a "revoke
+  access" button should also drop the persisted token and stop the runtime.
+- **Rate limiting.** The SDK ships a rate limiter, but the runtime does not wire
+  it yet: a local client can issue requests as fast as the timeout allows. Add
+  a per-session budget and map exhaustion to 429.
+- **Audit log.** No call log exists yet. When the tool catalog lands, log tool
+  name, session id, permission decision, and argument *shapes* (never values),
+  with the token redacted.
+- **Screenshot redaction.** `ui_capture` (PR-05) cannot be made safe by JSON
+  redaction; sensitive routes must refuse capture or be masked before encoding.
+- **Device test matrix.** No Android device run yet: foreground/background
+  transitions, rotation, dialogs, back navigation, process death, and the
+  minimum supported API level are all unverified.
 
 ## Non-goals (permanent)
 
