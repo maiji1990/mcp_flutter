@@ -27,6 +27,14 @@ void main() {
         ReleaseAppAction(
           name: 'pay.invoice',
           description: 'Pay an invoice',
+          inputSchema: const <String, Object?>{
+            'type': 'object',
+            'properties': <String, Object?>{
+              'invoiceId': <String, Object?>{'type': 'string', 'maxLength': 64},
+            },
+            'required': <String>['invoiceId'],
+            'additionalProperties': false,
+          },
           handler: (arguments) async {
             paid += 1;
             return <String, Object?>{'invoiceId': arguments['invoiceId']};
@@ -35,6 +43,7 @@ void main() {
       ]),
       ReleaseCaptureTools(
         source: FakeCaptureSource(routeName: '/home'),
+        policy: const ReleaseCapturePolicy(allowedRoutes: <String>{'/home'}),
         maxBytes: 4096,
       ),
     ]);

@@ -3,14 +3,14 @@ description: >-
   Opt-in MCP runtime for shipped Flutter apps. Exposes a guarded,
   permission-checked MCP surface inside an Android release build without the
   Dart VM Service, service extensions, or Dart eval.
-version: 0.6.0
+version: 0.7.0
 publish_to: 'none'
 license: MIT
 repository: >-
-  https://github.com/Arenukvern/mcp_flutter/tree/main/packages/release_runtime
-issue_tracker: https://github.com/Arenukvern/mcp_flutter/issues
+  https://github.com/maiji1990/mcp_flutter/tree/main/packages/release_runtime
+issue_tracker: https://github.com/maiji1990/mcp_flutter/issues
 documentation: >-
-  https://github.com/Arenukvern/mcp_flutter/tree/main/packages/release_runtime#readme
+  https://github.com/maiji1990/mcp_flutter/tree/main/packages/release_runtime#readme
 topics:
   - mcp
   - flutter
@@ -24,6 +24,7 @@ dependencies:
   # Published MCP SDK: Streamable HTTP transport, sessions, protocol
   # negotiation, bearer-token and Origin enforcement. Pinned to the 3.x line
   # whose HTTP transport exists in the released package, not only upstream.
+  json_schema: ^5.2.2
   mcp_server: ^3.1.1
   meta: ^1.18.0
 dev_dependencies:

@@ -6,10 +6,14 @@
 // release runtime on a real device.
 
 import 'dart:async';
+import 'dart:convert';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_mcp_toolkit_release/flutter_mcp_toolkit_release.dart';
 import 'package:flutter_mcp_toolkit_release_flutter/flutter_mcp_toolkit_release_flutter.dart';
+import 'package:flutter_mcp_toolkit_release_webview/flutter_mcp_toolkit_release_webview.dart';
+
+import 'web_demo_screen.dart';
 
 void main() {
   runApp(const ReleaseDemoApp());
@@ -71,8 +75,9 @@ class DemoScreen extends StatefulWidget {
   State<DemoScreen> createState() => _DemoScreenState();
 }
 
-class _DemoScreenState extends State<DemoScreen> {
+class _DemoScreenState extends State<DemoScreen> with WidgetsBindingObserver {
   final ReleaseSnapshotStore _store = ReleaseSnapshotStore();
+  final ReleaseWebViewRegistry _webRegistry = ReleaseWebViewRegistry();
   final TextEditingController _name = TextEditingController(text: 'Ada');
   ReleaseMcpRuntime? _runtime;
   String _status = 'off';
@@ -81,10 +86,42 @@ class _DemoScreenState extends State<DemoScreen> {
   int _count = 0;
 
   @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addObserver(this);
+  }
+
+  @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _name.dispose();
     unawaited(_shutdown());
     super.dispose();
+  }
+
+  /// A phone that is no longer in front must not keep an agent endpoint open:
+  /// the release runtime is a foreground capability (LIFE-01).
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      return;
+    }
+    final runtime = _runtime;
+    if (runtime == null) {
+      return;
+    }
+    unawaited(
+      runtime.stop().whenComplete(() {
+        if (!mounted) {
+          return;
+        }
+        setState(() {
+          _runtime = null;
+          _status = 'paused (app in background)';
+          _endpoint = '-';
+        });
+      }),
+    );
   }
 
   ReleaseRouteProvider get _routes =>
@@ -103,14 +140,30 @@ class _DemoScreenState extends State<DemoScreen> {
     setState(() => _busy = true);
     final runtime = ReleaseMcpRuntime.http(
       config: const ReleaseMcpConfig(port: 8765, endpoint: '/mcp'),
+      // A local client should not be able to hammer the UI; 120 calls/minute is
+      // generous for an agent and still bounded.
+      rateLimit: const ReleaseRateLimit(maxRequests: 120),
+      // Logcat carries the audit trail for the device run. Event payloads hold
+      // tool names and argument keys only, never values.
+      auditSink: (event) =>
+          debugPrint('release-mcp audit ${jsonEncode(event.toJson())}'),
       tools: ReleaseToolbox(<ReleaseToolSurface>[
         ReleaseReadTools(
           source: FlutterReleaseUiSnapshotSource(routeProvider: _routes),
           store: _store,
+          // /wallet is never readable, whatever the client was granted. The
+          // route provider always answers, so "unknown" means the app moved to
+          // a page it cannot name — refuse rather than guess.
+          privacy: const RedactingPrivacyFilter(
+            policy: ReleaseUiPrivacyPolicy(
+              deniedRoutes: <String>{'/wallet'},
+              denyWhenRouteUnknown: true,
+            ),
+          ),
         ),
         ReleaseInteractionTools(
           store: _store,
-          driver: const FlutterReleaseUiInteractionDriver(),
+          driver: FlutterReleaseUiInteractionDriver(routeProvider: _routes),
         ),
         ReleaseAppActionTools(<ReleaseAppAction>[
           ReleaseAppAction(
@@ -125,9 +178,21 @@ class _DemoScreenState extends State<DemoScreen> {
             },
           ),
         ]),
+        ReleaseWebTools(
+          source: WebViewDomReleaseSource(_webRegistry),
+          // The demo's H5 fixture is served from loopback over HTTP, so the
+          // staging opt-in is explicit here; production pages are HTTPS.
+          policy: const ReleaseWebPrivacyPolicy(allowInsecureHttp: true),
+        ),
         ReleaseCaptureTools(
           source: FlutterReleaseUiCaptureSource(routeProvider: _routes),
+          // Screenshots are opt-in per route: only the home screen, and never
+          // the wallet even though the home allow-list would not match it.
           policy: const ReleaseCapturePolicy(
+            // `/web-demo` is allowed so the fixture can prove what a hybrid
+            // (platform-view) screenshot actually contains; `/wallet` stays
+            // blocked.
+            allowedRoutes: <String>{'/', '/web-demo'},
             blockedRoutes: <String>{'/wallet'},
           ),
         ),
@@ -223,6 +288,8 @@ class _DemoScreenState extends State<DemoScreen> {
                   onPressed: () => _grant(<ReleasePermissionId>[
                     ReleasePermissionId.uiInteract,
                     ReleasePermissionId.uiCapture,
+                    ReleasePermissionId.webRead,
+                    ReleasePermissionId.webInteract,
                     ReleasePermissionId.app('demo.increment'),
                   ]),
                   child: const Text('Grant all'),
@@ -265,6 +332,16 @@ class _DemoScreenState extends State<DemoScreen> {
             ),
             child: const Text('Open secret screen'),
           ),
+          const SizedBox(height: 16),
+          OutlinedButton(
+            onPressed: () => Navigator.of(context).push(
+              MaterialPageRoute<void>(
+                settings: const RouteSettings(name: '/web-demo'),
+                builder: (context) => WebDemoScreen(registry: _webRegistry),
+              ),
+            ),
+            child: const Text('Open WebView demo'),
+          ),
           const Divider(height: 32),
           const Text('Scrollable list'),
           SizedBox(
@@ -289,7 +366,11 @@ class WalletScreen extends StatelessWidget {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(title: const Text('Wallet')),
-      body: const Center(child: Text('Card number 4111 1111 1111 1111')),
+      // Two layers on purpose: the route is denied for reads, and the text is
+      // marked sensitive in case the screen is ever reachable another way.
+      body: const Center(
+        child: AgentSensitive(child: Text('Card number 4111 1111 1111 1111')),
+      ),
     );
   }
 }

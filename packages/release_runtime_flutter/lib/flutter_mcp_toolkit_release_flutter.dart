@@ -7,3 +7,4 @@
 export 'src/flutter_capture_source.dart';
 export 'src/flutter_interaction_driver.dart';
 export 'src/flutter_ui_snapshot_source.dart';
+export 'src/sensitive_widgets.dart';

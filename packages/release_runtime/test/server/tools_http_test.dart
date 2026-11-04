@@ -74,8 +74,9 @@ final class _GatedSurface implements ReleaseToolSurface {
   @override
   Future<ReleaseToolCallResult> call(
     String name,
-    Map<String, Object?> arguments,
-  ) async {
+    Map<String, Object?> arguments, {
+    ReleaseCallAuthorization? authorization,
+  }) async {
     if (throws) {
       throw StateError('boom');
     }

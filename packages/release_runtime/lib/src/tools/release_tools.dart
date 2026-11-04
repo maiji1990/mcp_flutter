@@ -6,6 +6,7 @@
 
 import 'package:meta/meta.dart';
 
+import '../security/call_authorization.dart';
 import '../security/permissions.dart';
 
 /// One tool the runtime can offer.
@@ -120,11 +121,17 @@ abstract interface class ReleaseToolSurface {
 
   /// Executes [name] with [arguments].
   ///
+  /// [authorization] is the runtime's live authority for this call. A surface
+  /// that queues work re-checks it immediately before dispatch, so consent
+  /// withdrawn while a call waited is honoured. Surfaces called directly (tests,
+  /// embedding) may omit it; then the call is unchecked.
+  ///
   /// Implementations return [ReleaseToolCallResult] with `success: false` for
   /// ordinary refusals and may throw for programmer errors; the runtime maps a
   /// throw onto `unknown_error` without leaking the stack.
   Future<ReleaseToolCallResult> call(
     String name,
-    Map<String, Object?> arguments,
-  );
+    Map<String, Object?> arguments, {
+    ReleaseCallAuthorization? authorization,
+  });
 }

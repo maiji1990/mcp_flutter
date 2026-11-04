@@ -11,7 +11,10 @@ import 'errors/release_mcp_error.dart';
 import 'lifecycle/runtime_lifecycle.dart';
 import 'lifecycle/runtime_status.dart';
 import 'security/access_token.dart';
+import 'security/audit.dart';
+import 'security/call_authorization.dart';
 import 'security/permissions.dart';
+import 'security/rate_limiter.dart';
 import 'server/http_transport.dart';
 import 'tools/release_tools.dart';
 import 'transport/runtime_transport.dart';
@@ -39,6 +42,8 @@ final class ReleaseMcpRuntime {
     ReleaseRuntimeTransport? transport,
     ReleaseAccessToken? accessToken,
     ReleaseToolSurface? tools,
+    this.rateLimit = const ReleaseRateLimit(),
+    this.auditSink,
   }) : _transport = transport ?? const InertRuntimeTransport(),
        _accessToken = accessToken ?? ReleaseAccessToken.generate(),
        // Kept private on purpose: a public field would let a caller invoke the
@@ -47,6 +52,7 @@ final class ReleaseMcpRuntime {
        // ignore: prefer_initializing_formals
        _tools = tools {
     _lifecycle = ReleaseRuntimeLifecycle();
+    _rateLimiter = ReleaseRateLimiter(rateLimit);
   }
 
   /// Runtime backed by the Streamable HTTP transport.
@@ -58,15 +64,27 @@ final class ReleaseMcpRuntime {
     ReleaseMcpConfig config = const ReleaseMcpConfig(),
     ReleaseAccessToken? accessToken,
     ReleaseToolSurface? tools,
+    ReleaseRateLimit rateLimit = const ReleaseRateLimit(),
+    ReleaseAuditSink? auditSink,
   }) => ReleaseMcpRuntime(
     config: config,
     transport: HttpReleaseRuntimeTransport(),
     accessToken: accessToken,
     tools: tools,
+    rateLimit: rateLimit,
+    auditSink: auditSink,
   );
 
   /// Configuration the runtime was built with.
   final ReleaseMcpConfig config;
+
+  /// Sliding-window budget applied to every tool call.
+  final ReleaseRateLimit rateLimit;
+
+  /// Optional redaction-safe audit sink; exceptions from it are swallowed.
+  final ReleaseAuditSink? auditSink;
+
+  late final ReleaseRateLimiter _rateLimiter;
 
   final ReleaseRuntimeTransport _transport;
   final ReleaseToolSurface? _tools;
@@ -77,6 +95,11 @@ final class ReleaseMcpRuntime {
 
   ReleasePermissionSet _granted = ReleasePermissionSet.empty;
   int _toolRequests = 0;
+
+  /// Bumped by every consent and lifecycle change. A tool call carries the
+  /// epoch it started in; work that waited in a queue is refused once the epoch
+  /// moved, because its authority belongs to a session that no longer exists.
+  int _epoch = 0;
   Uri? _endpoint;
   DateTime? _startedAt;
   bool _disposed = false;
@@ -173,6 +196,7 @@ final class ReleaseMcpRuntime {
         ),
       );
 
+      _epoch += 1;
       _granted = effective;
       _endpoint = endpoint;
       _startedAt = DateTime.now().toUtc();
@@ -239,6 +263,7 @@ final class ReleaseMcpRuntime {
     _ensureNotDisposed();
     _requireRunning();
     _granted = _granted.union(ReleasePermissionSet(permissions));
+    _epoch += 1;
     _emitStatus();
     return status;
   });
@@ -255,6 +280,7 @@ final class ReleaseMcpRuntime {
     final revoked = ReleasePermissionSet(permissions)
         .difference(ReleasePermissionSet.readOnlyBase);
     _granted = _granted.difference(revoked);
+    _epoch += 1;
     _emitStatus();
     return status;
   });
@@ -318,6 +344,8 @@ final class ReleaseMcpRuntime {
   }
 
   void _resetSession() {
+    _epoch += 1;
+    _rateLimiter.reset();
     _granted = ReleasePermissionSet.empty;
     _endpoint = null;
     _startedAt = null;
@@ -352,14 +380,25 @@ final class _GuardedToolSurface implements ReleaseToolSurface {
   final ReleaseMcpRuntime _runtime;
   final ReleaseToolSurface _inner;
 
+  /// Calls currently dispatched, across all sessions.
+  int _active = 0;
+
+  /// Calls admitted but waiting for a slot, in arrival order.
+  final List<Completer<void>> _waiting = <Completer<void>>[];
+
+  /// Hard ceiling on queued calls, so a flood is refused rather than buffered
+  /// without bound (NET-01).
+  static const int _maxWaiting = 16;
+
   @override
   List<ReleaseToolDefinition> get tools => _inner.tools;
 
   @override
   Future<ReleaseToolCallResult> call(
     String name,
-    Map<String, Object?> arguments,
-  ) async {
+    Map<String, Object?> arguments, {
+    ReleaseCallAuthorization? authorization,
+  }) async {
     if (_runtime._lifecycle.state != ReleaseRuntimeState.running) {
       return _refusal(ReleaseMcpErrorCode.runtimeNotRunning);
     }
@@ -374,22 +413,172 @@ final class _GuardedToolSurface implements ReleaseToolSurface {
     if (definition == null) {
       return _refusal(ReleaseMcpErrorCode.toolNotFound);
     }
+
+    final epoch = _runtime._epoch;
+    final authority = ReleaseCallAuthorization(
+      epoch: epoch,
+      grantProbe: (permission) =>
+          _runtime._lifecycle.state == ReleaseRuntimeState.running &&
+          _runtime._epoch == epoch &&
+          _runtime._granted.contains(permission),
+    );
+
     final requiredPermission = definition.permissionFor(arguments);
-    if (requiredPermission != null &&
-        !_runtime._granted.contains(requiredPermission)) {
+    if (requiredPermission != null && !authority.allows(requiredPermission)) {
+      _record(
+        name,
+        requiredPermission,
+        allowed: false,
+        reason: ReleaseMcpErrorCode.permissionDenied,
+        epoch: epoch,
+        arguments: arguments,
+      );
       return _refusal(
         ReleaseMcpErrorCode.permissionDenied,
         details: <String, Object?>{'permission': requiredPermission.wireName},
       );
     }
 
+    if (!_runtime._rateLimiter.allow()) {
+      _record(
+        name,
+        requiredPermission,
+        allowed: false,
+        reason: ReleaseMcpErrorCode.rateLimited,
+        epoch: epoch,
+        arguments: arguments,
+      );
+      return _refusal(
+        ReleaseMcpErrorCode.rateLimited,
+        details: <String, Object?>{
+          'limit': _runtime.rateLimit.maxRequests,
+          'windowMs': _runtime.rateLimit.window.inMilliseconds,
+        },
+      );
+    }
+
+    final admits = await _acquire();
+    if (!admits) {
+      return _refusal(
+        ReleaseMcpErrorCode.serverBusy,
+        details: <String, Object?>{
+          'maxConcurrent': _runtime.config.maxConcurrentRequests,
+        },
+      );
+    }
+
+    // The call may have waited for a slot for a while. Re-check the state and
+    // the grant after admission, so a stop or a revocation that happened while
+    // it queued refuses it instead of letting it run under old authority.
+    if (_runtime._lifecycle.state != ReleaseRuntimeState.running) {
+      _release();
+      _record(
+        name,
+        requiredPermission,
+        allowed: false,
+        reason: ReleaseMcpErrorCode.runtimeNotRunning,
+        epoch: epoch,
+        arguments: arguments,
+      );
+      return _refusal(ReleaseMcpErrorCode.runtimeNotRunning);
+    }
+    if (requiredPermission != null && !authority.allows(requiredPermission)) {
+      _release();
+      _record(
+        name,
+        requiredPermission,
+        allowed: false,
+        reason: 'authorization_changed',
+        epoch: epoch,
+        arguments: arguments,
+      );
+      return _refusal(
+        ReleaseMcpErrorCode.permissionDenied,
+        details: <String, Object?>{
+          'permission': requiredPermission.wireName,
+          'reason': 'authorization_changed',
+        },
+      );
+    }
+
     try {
-      return await _inner.call(name, arguments);
+      final result = await _inner.call(
+        name,
+        arguments,
+        authorization: authorization ?? authority,
+      );
+      _record(
+        name,
+        requiredPermission,
+        allowed: result.success,
+        reason: result.error?.code,
+        epoch: epoch,
+        arguments: arguments,
+      );
+      return result;
     } catch (error) {
       return _refusal(
         ReleaseMcpErrorCode.unknown,
         details: <String, Object?>{'cause': error.runtimeType.toString()},
       );
+    } finally {
+      _release();
+    }
+  }
+
+  /// Takes a dispatch slot, waiting when the budget is full.
+  ///
+  /// Returns false when the queue is already at [_maxWaiting].
+  Future<bool> _acquire() {
+    final limit = _runtime.config.maxConcurrentRequests;
+    if (_active < limit) {
+      _active += 1;
+      return Future<bool>.value(true);
+    }
+    if (_waiting.length >= _maxWaiting) {
+      return Future<bool>.value(false);
+    }
+    final completer = Completer<void>();
+    _waiting.add(completer);
+    return completer.future.then((_) => true);
+  }
+
+  /// Hands the slot to the next waiter, or gives it back.
+  void _release() {
+    if (_waiting.isNotEmpty) {
+      _waiting.removeAt(0).complete();
+    } else {
+      _active -= 1;
+    }
+  }
+
+  /// Emits a redaction-safe audit record; sink failures are swallowed.
+  void _record(
+    String tool,
+    ReleasePermissionId? permission, {
+    required bool allowed,
+    String? reason,
+    required int epoch,
+    required Map<String, Object?> arguments,
+  }) {
+    final sink = _runtime.auditSink;
+    if (sink == null) {
+      return;
+    }
+    try {
+      sink(
+        ReleaseAuditEvent(
+          tool: tool,
+          allowed: allowed,
+          at: DateTime.now(),
+          permission: permission?.wireName,
+          reason: reason,
+          argumentKeys: arguments.keys.take(16).toList(growable: false),
+          epoch: epoch,
+        ),
+      );
+    } on Object {
+      // Auditing must never break a call.
     }
   }
 

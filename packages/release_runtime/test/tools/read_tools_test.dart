@@ -73,7 +73,7 @@ void main() {
       expect(result.toJson()['success'], isTrue);
     });
 
-    test('masks a sensitive value but keeps its label', () async {
+    test('masks every text field of a sensitive node', () async {
       final releaseTools = ReleaseReadTools(source: _source());
 
       final result = await releaseTools.call(
@@ -86,9 +86,112 @@ void main() {
         (node) => node['identifier'] == 'pin',
       );
       expect(pin['value'], '••••');
-      expect(pin['label'], 'PIN');
+      expect(pin['label'], '••••');
+      expect(pin['hint'], '••••');
       expect(pin['sensitive'], isTrue);
       expect(result.data.toString(), isNot(contains('hunter2')));
+      expect(result.data.toString(), isNot(contains('PIN')));
+    });
+
+    test(
+      'a sensitive label is masked even when the value is unrelated',
+      () async {
+        final releaseTools = ReleaseReadTools(
+          source: FakeSnapshotSource(
+            routeName: '/home',
+            nodes: <ReleaseUiNode>[
+              _node(
+                's_0',
+                type: 'label',
+                identifier: 'card',
+                label: 'Card number 4111 1111 1111 1111',
+                sensitive: true,
+                actions: const <String>[],
+              ),
+            ],
+          ),
+        );
+
+        final result = await releaseTools.call(
+          'ui_get_tree',
+          <String, Object?>{},
+        );
+
+        expect(result.success, isTrue);
+        expect(result.toJson().toString(), isNot(contains('4111')));
+      },
+    );
+
+    test('a denied route is refused before any node is serialized', () async {
+      final releaseTools = ReleaseReadTools(
+        source: FakeSnapshotSource(
+          routeName: '/wallet',
+          nodes: <ReleaseUiNode>[
+            _node(
+              's_0',
+              type: 'label',
+              label: 'Card number 4111 1111 1111 1111',
+              actions: const <String>[],
+            ),
+          ],
+        ),
+        privacy: const RedactingPrivacyFilter(
+          policy: ReleaseUiPrivacyPolicy(deniedRoutes: <String>{'/wallet'}),
+        ),
+      );
+
+      final tree = await releaseTools.call('ui_get_tree', <String, Object?>{});
+      final find = await releaseTools.call('ui_find_element', <String, Object?>{
+        'label': 'Card number 4111 1111 1111 1111',
+      });
+
+      expect(tree.success, isFalse);
+      expect(tree.error!.code, ReleaseMcpErrorCode.routeDenied);
+      expect(find.error!.code, ReleaseMcpErrorCode.routeDenied);
+      expect(tree.toJson().toString(), isNot(contains('4111')));
+      expect(find.toJson().toString(), isNot(contains('4111')));
+    });
+
+    test('a masked route keeps the tree but loses every value', () async {
+      final releaseTools = ReleaseReadTools(
+        source: _source(),
+        privacy: const RedactingPrivacyFilter(
+          policy: ReleaseUiPrivacyPolicy(maskedRoutes: <String>{'/home'}),
+        ),
+      );
+
+      final result = await releaseTools.call(
+        'ui_get_tree',
+        <String, Object?>{},
+      );
+
+      expect(result.success, isTrue);
+      final pin = (result.data!['nodes']! as List<Object?>)
+          .cast<Map<String, Object?>>()
+          .firstWhere((node) => node['identifier'] == 'pin');
+      expect(pin['value'], '••••');
+      expect(pin['label'], '••••');
+    });
+
+    test('a denied identifier removes the node and its subtree', () async {
+      final releaseTools = ReleaseReadTools(
+        source: _source(),
+        privacy: const RedactingPrivacyFilter(
+          policy: ReleaseUiPrivacyPolicy(deniedIdentifiers: <String>{'pin'}),
+        ),
+      );
+
+      final result = await releaseTools.call(
+        'ui_get_tree',
+        <String, Object?>{},
+      );
+
+      final refs = (result.data!['nodes']! as List<Object?>)
+          .cast<Map<String, Object?>>()
+          .map((node) => node['ref'])
+          .toList();
+      expect(refs, isNot(contains('s_2')));
+      expect(result.toJson().toString(), isNot(contains('hunter2')));
     });
 
     test('maxNodes caps the answer and flags truncation', () async {
@@ -101,7 +204,9 @@ void main() {
       expect(result.success, isTrue);
       expect(result.data!['nodeCount'], 2);
       expect(result.data!['truncated'], isTrue);
-      expect(result.data!['totalNodeCount'], 4);
+      // The budget is pushed into the source, so the source's own cap is the
+      // total it reports back; the runtime no longer sees the extra nodes.
+      expect(result.data!['totalNodeCount'], 2);
     });
 
     test('maxDepth walks only the requested levels', () async {

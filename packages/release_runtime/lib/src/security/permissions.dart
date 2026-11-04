@@ -30,11 +30,21 @@ final class ReleasePermissionId {
     'ui:capture',
   );
 
-  /// The three permissions that exist without app registration.
+  /// Read the DOM of a WebView the app explicitly registered.
+  static const ReleasePermissionId webRead = ReleasePermissionId._('web:read');
+
+  /// Click, type into, and scroll a registered WebView.
+  static const ReleasePermissionId webInteract = ReleasePermissionId._(
+    'web:interact',
+  );
+
+  /// The permissions that exist without app registration.
   static const List<ReleasePermissionId> core = <ReleasePermissionId>[
     uiRead,
     uiInteract,
     uiCapture,
+    webRead,
+    webInteract,
   ];
 
   static const String _appPrefix = 'app:';
@@ -64,6 +74,10 @@ final class ReleasePermissionId {
         return uiInteract;
       case 'ui:capture':
         return uiCapture;
+      case 'web:read':
+        return webRead;
+      case 'web:interact':
+        return webInteract;
     }
 
     if (!value.startsWith(_appPrefix)) {
@@ -110,7 +124,10 @@ final class ReleasePermissionId {
 
   /// True for permissions that let a session change app state or read pixels.
   bool get isSensitive =>
-      this == uiInteract || this == uiCapture || isAppPermission;
+      this == uiInteract ||
+      this == uiCapture ||
+      this == webInteract ||
+      isAppPermission;
 
   @override
   bool operator ==(Object other) =>

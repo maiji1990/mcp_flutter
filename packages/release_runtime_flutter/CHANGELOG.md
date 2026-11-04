@@ -1,3 +1,20 @@
+## 0.7.0 — unreleased (fork)
+
+### Added
+
+- `AgentSensitive` and `ExcludeFromAgent` widgets: opt a subtree into masking
+  (`Semantics.obscured`) or out of the semantics tree entirely.
+- `FlutterReleaseUiInteractionDriver.currentRouteName()`, backed by the same
+  `ReleaseRouteProvider` as the snapshot source, so an interaction can prove the
+  app is still on the page the snapshot came from.
+- Widget test: the two wrappers keep a card number and an internal note out of
+  `ui_get_tree`.
+
+### Changed
+
+- Consumes `flutter_mcp_toolkit_release` 0.7.0. Register the capture adapter
+  with an `allowedRoutes` policy: capture is deny-by-default now.
+
 ## 0.6.0 — unreleased (fork)
 
 ### Changed

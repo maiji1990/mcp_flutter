@@ -19,6 +19,11 @@ final class FakeCaptureSource implements ReleaseUiCaptureSource {
   }) : bytes = bytes ?? Uint8List.fromList(List<int>.filled(32, 7));
 
   String? routeName;
+
+  /// When set, the route the app reports after the frame was taken, so tests
+  /// can reproduce a navigation race.
+  String? routeAfterCapture;
+
   Uint8List bytes;
   int width;
   int height;
@@ -39,6 +44,11 @@ final class FakeCaptureSource implements ReleaseUiCaptureSource {
   @override
   Future<ReleaseCaptureResult?> capture(ReleaseCaptureRequest request) async {
     requests.add(request);
+    final after = routeAfterCapture;
+    if (after != null) {
+      routeName = after;
+      routeAfterCapture = null;
+    }
     if (captureThrows) {
       throw StateError('capture blew up');
     }

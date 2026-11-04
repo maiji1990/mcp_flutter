@@ -138,6 +138,27 @@ abstract final class ReleaseMcpErrorCode {
   /// The app's capture policy blocks the current route.
   static const String routeBlocked = 'route_blocked';
 
+  /// The app's privacy policy refuses to serialize this route at all.
+  static const String routeDenied = 'route_denied';
+
+  /// The screen changed between two reads, so the answer was discarded.
+  static const String routeChanged = 'route_changed';
+
+  /// A registered business action carries a JSON Schema that cannot be used.
+  static const String invalidSchema = 'invalid_schema';
+
+  /// Too many requests are in flight; the call was refused before dispatch.
+  static const String serverBusy = 'server_busy';
+
+  /// The configured request budget for the window is exhausted.
+  static const String rateLimited = 'rate_limited';
+
+  /// A WebView page is not on an origin the app registered.
+  static const String originDenied = 'origin_denied';
+
+  /// The app did not register a WebView with that id.
+  static const String viewNotFound = 'view_not_found';
+
   /// The requested image format is not available.
   static const String unsupportedFormat = 'unsupported_format';
 
@@ -337,6 +358,55 @@ const Map<String, ReleaseErrorDescriptor> _descriptors =
         retryable: false,
         httpLikeStatus: 415,
         message: 'That image format is not available.',
+      ),
+      ReleaseMcpErrorCode.routeDenied: ReleaseErrorDescriptor(
+        code: ReleaseMcpErrorCode.routeDenied,
+        category: ReleaseMcpErrorCategory.permission,
+        retryable: false,
+        httpLikeStatus: 403,
+        message: 'The app privacy policy refuses to read this screen.',
+      ),
+      ReleaseMcpErrorCode.routeChanged: ReleaseErrorDescriptor(
+        code: ReleaseMcpErrorCode.routeChanged,
+        category: ReleaseMcpErrorCategory.state,
+        retryable: true,
+        httpLikeStatus: 409,
+        message: 'The screen changed while the request was running.',
+      ),
+      ReleaseMcpErrorCode.invalidSchema: ReleaseErrorDescriptor(
+        code: ReleaseMcpErrorCode.invalidSchema,
+        category: ReleaseMcpErrorCategory.config,
+        retryable: false,
+        httpLikeStatus: 400,
+        message: 'A registered action schema is not usable.',
+      ),
+      ReleaseMcpErrorCode.serverBusy: ReleaseErrorDescriptor(
+        code: ReleaseMcpErrorCode.serverBusy,
+        category: ReleaseMcpErrorCategory.transport,
+        retryable: true,
+        httpLikeStatus: 429,
+        message: 'The runtime is at its concurrency budget.',
+      ),
+      ReleaseMcpErrorCode.rateLimited: ReleaseErrorDescriptor(
+        code: ReleaseMcpErrorCode.rateLimited,
+        category: ReleaseMcpErrorCategory.transport,
+        retryable: true,
+        httpLikeStatus: 429,
+        message: 'The request budget for this window is exhausted.',
+      ),
+      ReleaseMcpErrorCode.originDenied: ReleaseErrorDescriptor(
+        code: ReleaseMcpErrorCode.originDenied,
+        category: ReleaseMcpErrorCategory.permission,
+        retryable: false,
+        httpLikeStatus: 403,
+        message: 'That WebView origin is not authorized by the app.',
+      ),
+      ReleaseMcpErrorCode.viewNotFound: ReleaseErrorDescriptor(
+        code: ReleaseMcpErrorCode.viewNotFound,
+        category: ReleaseMcpErrorCategory.validation,
+        retryable: false,
+        httpLikeStatus: 404,
+        message: 'No WebView with that id is registered.',
       ),
       ReleaseMcpErrorCode.unknown: ReleaseErrorDescriptor(
         code: ReleaseMcpErrorCode.unknown,

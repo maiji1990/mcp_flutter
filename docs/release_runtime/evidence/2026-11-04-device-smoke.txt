@@ -1,0 +1,67 @@
+# Device smoke evidence — 2026-11-04
+
+Device: Huawei PTP-AN10 (PTP_AN10 / HNPTP), Android 17 (API 37), arm64.
+Build: `flutter build apk --release --target-platform android-arm64`, Flutter
+3.47.9 / Dart 3.13.7, APK 18,402,198 bytes.
+Command: `dart run tool/mcp_smoke.dart --token <redacted> --webview-check --wallet-check`
+(reached over `adb forward tcp:8765 tcp:8765`).
+
+The pairing token is redacted; it is a per-launch secret and is never stored in
+this repository.
+
+```text
+      server: {name: flutter_mcp_toolkit_release, version: 0.7.0}
+PASS  initialize handshake
+      tools: [ui_get_tree, ui_get_current_page, ui_find_element, ui_click, ui_set_text, ui_scroll, app_invoke_action, web_list_views, web_get_tree, web_find_element, web_click, web_set_text, web_scroll, web_get_state, ui_capture]
+PASS  tools/list exposes the Flutter and web tools
+      page: {snapshotId: 9, capturedAt: 2026-11-04T03:59:31.886851Z, routeName: /, interactionSurface: flutter_widgets, nodeCount: 30}
+PASS  ui_get_current_page
+      nodes: 30, snapshot: 10, counter: 2
+PASS  ui_get_tree finds the Increment button
+      click: {dispatched: true, ref: s_10, action: tap, via: semantic_action}
+PASS  ui_click taps it
+      expected "Counter: 3": true
+PASS  the screen shows the counter had incremented
+      ambiguity answer: ambiguous_match
+PASS  ui_find_element refuses an ambiguous role query
+      field: Your name ref=s_11
+PASS  ui_find_element locates the name field by label
+      set_text: {dispatched: true, ref: s_11, action: setText, via: editable_state, verified: true}
+PASS  ui_set_text writes into it
+PASS  ui_get_tree reads the value back
+      scroll: {dispatched: true, ref: s_28, action: scroll_down, via: semantic_scroll_to_offset} error: null details: null
+PASS  ui_scroll moves the list
+      invalid action answer: invalid_argument
+PASS  app_invoke_action rejects arguments the schema forbids
+      action: {action: demo.increment, result: {count: 4}}
+PASS  app_invoke_action runs the demo action
+      true ? png : not-png  512x1120 68703 bytes
+PASS  ui_capture returns a PNG
+      answered: protocol
+PASS  an interaction without snapshotId is refused
+      views: [{viewId: order-h5, allowedOrigins: [http://127.0.0.1:42477], url: http://127.0.0.1:42477/}]
+PASS  opens the WebView demo and registers the view
+      url: http://127.0.0.1:42477/ nodes: 3 pinMasked: true
+PASS  web_get_tree reads the H5 DOM and masks the PIN
+      set_text: {viewId: order-h5, dispatched: true, ref: w87e0ea3378977819_0, action: setText, url: http://127.0.0.1:42477/, navigated: false}
+PASS  web_set_text fills the search field
+      click: {viewId: order-h5, dispatched: true, ref: w2a3071253227cbea_1, action: click, url: http://127.0.0.1:42477/, navigated: false}
+PASS  web_click runs the page button
+      result visible: true
+PASS  web_get_tree sees the page result
+      replay: stale_snapshot
+PASS  a consumed WebView snapshot cannot be replayed
+      capture: route_blocked
+PASS  capture is refused on the WebView demo route
+      state: {viewId: order-h5, url: http://127.0.0.1:42477/, origin: http://127.0.0.1:42477, navigationEpoch: 1, loading: false}
+PASS  web_get_state reports the loopback origin
+      wallet read: route_denied leaked=false
+      capture answer: route_blocked
+PASS  capture is refused on a policy-blocked route
+
+ALL STEPS PASSED
+```
+
+One earlier run (before the two fixes below) failed at `web_get_tree` with
+`script_failed`; the adapter's JS-result decoding and the generated script's
+whitespace regex were fixed, then this run passed end to end.

@@ -1,0 +1,87 @@
+name: release_runtime
+
+# The release runtime is a separate product surface from the debug MCP path:
+# it ships inside a release APK, so its security guarantees must be a required
+# gate, not an optional local check.
+
+on:
+  pull_request:
+    paths:
+      - 'packages/release_runtime/**'
+      - 'packages/release_runtime_flutter/**'
+      - 'packages/release_runtime_webview/**'
+      - 'showcase/flutter_release_demo/**'
+      - 'pubspec.yaml'
+      - 'pubspec.lock'
+      - '.github/workflows/release_runtime.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'packages/release_runtime/**'
+      - 'packages/release_runtime_flutter/**'
+      - 'packages/release_runtime_webview/**'
+      - 'showcase/flutter_release_demo/**'
+      - 'pubspec.yaml'
+      - 'pubspec.lock'
+      - '.github/workflows/release_runtime.yml'
+  workflow_dispatch:
+
+concurrency:
+  group: release-runtime-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  analyze-and-test:
+    name: analyze and test
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+      - name: Resolve workspace
+        run: flutter pub get
+      - name: release_runtime (dart)
+        working-directory: packages/release_runtime
+        run: |
+          dart analyze
+          dart test
+      - name: release_runtime_flutter
+        working-directory: packages/release_runtime_flutter
+        run: |
+          flutter analyze
+          flutter test
+      - name: release_runtime_webview
+        working-directory: packages/release_runtime_webview
+        run: |
+          flutter analyze
+          flutter test
+      - name: release demo
+        working-directory: showcase/flutter_release_demo
+        run: |
+          flutter analyze
+          flutter test
+
+  release-apk:
+    name: build release APK
+    needs: analyze-and-test
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+      - name: Resolve workspace
+        run: flutter pub get
+      - name: Build the demo as a release APK
+        working-directory: showcase/flutter_release_demo
+        run: flutter build apk --release
+      - uses: actions/upload-artifact@v4
+        with:
+          name: flutter-release-demo-apk
+          path: showcase/flutter_release_demo/build/app/outputs/flutter-apk/app-release.apk
+          if-no-files-found: error

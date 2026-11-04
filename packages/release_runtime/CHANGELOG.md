@@ -1,3 +1,56 @@
+## 0.7.0 — unreleased (fork)
+
+Security hardening from the 2026-11-04 review, plus the optional WebView tools.
+
+### Added
+
+- `ReleaseUiPrivacyPolicy` (SEC-01): denied/masked routes, denied/masked
+  identifiers, denied types, `maskAllValues`, `denyWhenRouteUnknown`.
+  `RedactingPrivacyFilter.screen()` now returns a snapshot **or a refusal**
+  (`route_denied`, `reason: sensitive_route`); a denied page builds no payload.
+- `ReleaseCallAuthorization` + authorization epochs (AUTH-01): every call
+  carries the epoch it started in and a live grant probe. Interaction and action
+  queues re-check consent immediately before dispatch, so a call that waited
+  through a revocation is refused (`authorization_changed`).
+- `json_schema`-backed action validation (ACT-01): schemas are compiled when an
+  action is registered and enforced on every call; failures list field paths
+  only. `maxArgumentBytes` (64 KiB) caps the payload.
+- `web:*` tool family and value types (`ReleaseWebTools`,
+  `ReleaseEmbeddedWebSource`, `ReleaseWebDomSnapshot`, `ReleaseWebNode`,
+  `ReleaseWebPrivacyPolicy`) behind `web:read` / `web:interact`. No
+  JavaScript-evaluation tool.
+- `ReleaseCapturePolicy.allowedRoutes`, a `route_changed` refusal, and a
+  post-frame route re-read (CAP-01/CAP-02).
+- Concurrency budget in the guarded surface (NET-01): `maxConcurrentRequests`
+  dispatches plus a bounded wait queue; overflow is `server_busy`.
+- `ReleaseRateLimit` (sliding window, default off) and the `rate_limited`
+  code: over-budget calls are refused before dispatch.
+- `ReleaseAuditSink` / `ReleaseAuditEvent`: one redaction-safe record per
+  decision (tool, permission, allowed, reason, argument keys, epoch); sink
+  failures never break a call.
+- New codes: `route_denied`, `route_changed`, `invalid_schema`,
+  `server_busy`, `rate_limited`, `origin_denied`, `view_not_found`.
+
+### Changed
+
+- `ReleaseCapturePolicy()` now captures nothing: it is allow-list based and
+  unknown routes are refused. Callers must list `allowedRoutes`.
+- A `sensitive` node now loses `label` and `hint` as well as `value`.
+- `ReleaseToolSurface.call` takes an optional `ReleaseCallAuthorization`;
+  `ReleaseUiInteractionDriver` gained `currentRouteName()`.
+- `ui_get_tree` forwards `maxNodes` to the snapshot source (UI-02), so
+  `totalNodeCount` reports the source's count.
+
+### Fixed
+
+- Sensitive `label`/`hint` no longer reach a client; a denied route can no
+  longer be read through `ui_get_tree`, `ui_find_element`, or an error payload.
+- A revoked consent can no longer be bypassed by a queued interaction or
+  business action.
+- Invalid business-action arguments no longer reach the handler.
+- A screenshot taken across a navigation is discarded instead of returned.
+- A ref from a previous route is refused with `route_changed`.
+
 ## 0.6.0 — unreleased (fork)
 
 ### Added

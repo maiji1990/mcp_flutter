@@ -4,6 +4,7 @@
 //
 // Fork addition (Android release runtime).
 
+import '../security/call_authorization.dart';
 import 'release_tools.dart';
 
 /// One surface over several, so a runtime can expose read and interaction
@@ -39,12 +40,13 @@ final class ReleaseToolbox implements ReleaseToolSurface {
   @override
   Future<ReleaseToolCallResult> call(
     String name,
-    Map<String, Object?> arguments,
-  ) {
+    Map<String, Object?> arguments, {
+    ReleaseCallAuthorization? authorization,
+  }) {
     for (final part in parts) {
       for (final tool in part.tools) {
         if (tool.name == name) {
-          return part.call(name, arguments);
+          return part.call(name, arguments, authorization: authorization);
         }
       }
     }

@@ -92,6 +92,13 @@ abstract interface class ReleaseUiInteractionDriver {
   /// current; [inspect] is what catches a node that left the tree.
   Future<bool> isSnapshotCurrent(String snapshotId);
 
+  /// Route the app is showing now, or null when it cannot say.
+  ///
+  /// The interaction tools compare it with the route recorded in the snapshot:
+  /// a ref from the settings page must not click whatever now occupies its
+  /// position on the wallet page (UI-01).
+  Future<String?> currentRouteName();
+
   /// Current state of the node behind [ref].
   Future<ReleaseUiNodeState> inspect(String ref);
 

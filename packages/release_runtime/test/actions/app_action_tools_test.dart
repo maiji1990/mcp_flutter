@@ -2,15 +2,33 @@
 // Copyright (c) 2025, Flutter Inspector MCP Server authors.
 // Licensed under the MIT License.
 
+import 'dart:async';
+
 import 'package:flutter_mcp_toolkit_release/flutter_mcp_toolkit_release.dart';
 import 'package:test/test.dart';
+
+const Map<String, Object?> _invoiceSchema = <String, Object?>{
+  'type': 'object',
+  'properties': <String, Object?>{
+    'invoiceId': <String, Object?>{'type': 'string', 'maxLength': 64},
+    'amount': <String, Object?>{
+      'type': 'number',
+      'minimum': 1,
+      'maximum': 1000,
+    },
+  },
+  'required': <String>['invoiceId'],
+  'additionalProperties': false,
+};
 
 ReleaseAppAction _action(
   String name, {
   Future<Map<String, Object?>?> Function(Map<String, Object?>)? handler,
+  Map<String, Object?> inputSchema = _invoiceSchema,
 }) => ReleaseAppAction(
   name: name,
   description: 'Action $name',
+  inputSchema: inputSchema,
   handler: handler ?? (arguments) async => <String, Object?>{'ok': true},
 );
 
@@ -43,6 +61,14 @@ void main() {
         throwsArgumentError,
       );
       expect(() => _action('Pay Invoice'), throwsA(isA<ReleaseMcpException>()));
+    });
+
+    test('rejects a schema that cannot be compiled', () {
+      expect(
+        () =>
+            _action('broken', inputSchema: const <String, Object?>{'type': 5}),
+        throwsArgumentError,
+      );
     });
 
     test('resolves each action to its own app permission', () {
@@ -92,7 +118,15 @@ void main() {
 
     test('an action without a payload returns an empty result', () async {
       final tools = ReleaseAppActionTools(<ReleaseAppAction>[
-        _action('refresh', handler: (arguments) async => null),
+        _action(
+          'refresh',
+          inputSchema: const <String, Object?>{
+            'type': 'object',
+            'properties': <String, Object?>{},
+            'additionalProperties': false,
+          },
+          handler: (arguments) async => null,
+        ),
       ]);
 
       final result = await tools.call(ReleaseAppActionTools.toolName, {
@@ -131,10 +165,78 @@ void main() {
       expect(badArguments.error!.code, ReleaseMcpErrorCode.invalidArgument);
     });
 
+    test('rejects arguments that do not match the schema', () async {
+      var calls = 0;
+      final tools = ReleaseAppActionTools(<ReleaseAppAction>[
+        _action(
+          'pay.invoice',
+          handler: (arguments) async {
+            calls += 1;
+            return <String, Object?>{'ok': true};
+          },
+        ),
+      ]);
+
+      final missing = await tools.call(ReleaseAppActionTools.toolName, {
+        'name': 'pay.invoice',
+        'arguments': <String, Object?>{'amount': 10},
+      });
+      final wrongType = await tools.call(ReleaseAppActionTools.toolName, {
+        'name': 'pay.invoice',
+        'arguments': <String, Object?>{'invoiceId': 42},
+      });
+      final extra = await tools.call(ReleaseAppActionTools.toolName, {
+        'name': 'pay.invoice',
+        'arguments': <String, Object?>{'invoiceId': 'INV-3', 'admin': true},
+      });
+      final tooLong = await tools.call(ReleaseAppActionTools.toolName, {
+        'name': 'pay.invoice',
+        'arguments': <String, Object?>{'invoiceId': 'x' * 65},
+      });
+      final outOfRange = await tools.call(ReleaseAppActionTools.toolName, {
+        'name': 'pay.invoice',
+        'arguments': <String, Object?>{'invoiceId': 'INV-4', 'amount': -1},
+      });
+
+      for (final result in <ReleaseToolCallResult>[
+        missing,
+        wrongType,
+        extra,
+        tooLong,
+        outOfRange,
+      ]) {
+        expect(result.success, isFalse);
+        expect(result.error!.code, ReleaseMcpErrorCode.invalidArgument);
+        expect(result.error!.details['fields'], isA<List<Object?>>());
+        expect(result.toJson().toString(), isNot(contains('admin')));
+      }
+      expect(calls, 0);
+    });
+
+    test('rejects an oversized argument object before validation', () async {
+      final tools = ReleaseAppActionTools(<ReleaseAppAction>[
+        _action('pay.invoice'),
+      ], maxArgumentBytes: 128);
+
+      final result = await tools.call(ReleaseAppActionTools.toolName, {
+        'name': 'pay.invoice',
+        'arguments': <String, Object?>{'invoiceId': 'x' * 200},
+      });
+
+      expect(result.error!.code, ReleaseMcpErrorCode.invalidArgument);
+      expect(result.error!.details['field'], 'arguments');
+      expect(result.toJson().toString(), isNot(contains('xxxx')));
+    });
+
     test('a throwing action becomes action_failed without its text', () async {
       final tools = ReleaseAppActionTools(<ReleaseAppAction>[
         _action(
           'pay',
+          inputSchema: const <String, Object?>{
+            'type': 'object',
+            'properties': <String, Object?>{},
+            'additionalProperties': false,
+          },
           handler: (arguments) async => throw StateError('card declined 4111'),
         ),
       ]);
@@ -155,6 +257,11 @@ void main() {
       final tools = ReleaseAppActionTools(<ReleaseAppAction>[
         _action(
           'slow',
+          inputSchema: const <String, Object?>{
+            'type': 'object',
+            'properties': <String, Object?>{},
+            'additionalProperties': false,
+          },
           handler: (arguments) async {
             running += 1;
             maxRunning = running > maxRunning ? running : maxRunning;
@@ -173,6 +280,59 @@ void main() {
       expect(results.every((result) => result.success), isTrue);
       expect(maxRunning, 1);
     });
+
+    test(
+      'a revoked consent refuses an action that waited in the queue',
+      () async {
+        var granted = true;
+        var calls = 0;
+        final gate = Completer<void>();
+        final tools = ReleaseAppActionTools(<ReleaseAppAction>[
+          ReleaseAppAction(
+            name: 'slow',
+            description: 'blocks until the test releases it',
+            inputSchema: const <String, Object?>{
+              'type': 'object',
+              'properties': <String, Object?>{},
+              'additionalProperties': false,
+            },
+            handler: (arguments) async {
+              calls += 1;
+              await gate.future;
+              return <String, Object?>{'ok': true};
+            },
+          ),
+        ]);
+        final authorization = ReleaseCallAuthorization(
+          epoch: 1,
+          grantProbe: (permission) =>
+              granted && permission == ReleasePermissionId.app('slow'),
+        );
+
+        final first = tools.call(
+          ReleaseAppActionTools.toolName,
+          <String, Object?>{'name': 'slow'},
+          authorization: authorization,
+        );
+        await Future<void>.delayed(Duration.zero);
+        final second = tools.call(
+          ReleaseAppActionTools.toolName,
+          <String, Object?>{'name': 'slow'},
+          authorization: authorization,
+        );
+        granted = false;
+        gate.complete();
+
+        final firstResult = await first;
+        final secondResult = await second;
+
+        expect(firstResult.success, isTrue, reason: firstResult.error?.message);
+        expect(secondResult.success, isFalse);
+        expect(secondResult.error!.code, ReleaseMcpErrorCode.permissionDenied);
+        expect(secondResult.error!.details['reason'], 'authorization_changed');
+        expect(calls, 1);
+      },
+    );
 
     test('an unknown tool name is refused', () async {
       final tools = ReleaseAppActionTools(<ReleaseAppAction>[_action('pay')]);

@@ -2,6 +2,8 @@
 // Copyright (c) 2025, Flutter Inspector MCP Server authors.
 // Licensed under the MIT License.
 
+import 'dart:async';
+
 import 'package:flutter_mcp_toolkit_release/flutter_mcp_toolkit_release.dart';
 import 'package:test/test.dart';
 
@@ -39,15 +41,24 @@ List<ReleaseUiNode> _defaultNodes() => <ReleaseUiNode>[
 
 /// Read and interaction tools over one shared snapshot store.
 final class Harness {
-  Harness({List<ReleaseUiNode>? nodes, FakeDriver? driver})
-    : driver = driver ?? FakeDriver(),
-      store = ReleaseSnapshotStore() {
+  Harness({
+    List<ReleaseUiNode>? nodes,
+    FakeDriver? driver,
+    this.routeName = '/home',
+  }) : driver = driver ?? FakeDriver(),
+       store = ReleaseSnapshotStore() {
+    this.driver.routeName ??= routeName;
     read = ReleaseReadTools(
-      source: FakeSnapshotSource(nodes: nodes ?? _defaultNodes()),
+      source: FakeSnapshotSource(
+        nodes: nodes ?? _defaultNodes(),
+        routeName: routeName,
+      ),
       store: store,
     );
     interaction = ReleaseInteractionTools(store: store, driver: this.driver);
   }
+
+  final String routeName;
 
   final FakeDriver driver;
   final ReleaseSnapshotStore store;
@@ -414,6 +425,64 @@ void main() {
       final result = await h.click('s_2', limited.snapshotId);
 
       expect(_code(result), ReleaseMcpErrorCode.unknownRef);
+    });
+  });
+
+  group('authorization epoch and navigation', () {
+    test(
+      'a revoked consent refuses a click that waited in the queue',
+      () async {
+        var granted = true;
+        final gate = Completer<void>();
+        final driver = FakeDriver()..tapGate = gate;
+        final h = Harness(driver: driver);
+        final tree = await h.tree();
+        final authorization = ReleaseCallAuthorization(
+          epoch: 1,
+          grantProbe: (permission) =>
+              granted && permission == ReleasePermissionId.uiInteract,
+        );
+        final arguments = <String, Object?>{
+          'ref': 's_0',
+          'snapshotId': tree.snapshotId,
+        };
+
+        final first = h.interaction.call(
+          'ui_click',
+          arguments,
+          authorization: authorization,
+        );
+        await Future<void>.delayed(Duration.zero);
+        final second = h.interaction.call(
+          'ui_click',
+          arguments,
+          authorization: authorization,
+        );
+        granted = false;
+        gate.complete();
+
+        final firstResult = await first;
+        final secondResult = await second;
+
+        expect(firstResult.success, isTrue, reason: firstResult.error?.message);
+        expect(secondResult.success, isFalse);
+        expect(secondResult.error!.code, ReleaseMcpErrorCode.permissionDenied);
+        expect(secondResult.error!.details['reason'], 'authorization_changed');
+        expect(driver.tapped, <String>['s_0']);
+      },
+    );
+
+    test('a route change since the snapshot makes the ref stale', () async {
+      final h = Harness(routeName: '/home');
+      final tree = await h.tree();
+      h.driver.routeName = '/wallet';
+
+      final result = await h.click('s_0', tree.snapshotId);
+
+      expect(result.success, isFalse);
+      expect(result.error!.code, ReleaseMcpErrorCode.staleSnapshot);
+      expect(result.error!.details['reason'], 'route_changed');
+      expect(h.driver.tapped, isEmpty);
     });
   });
 

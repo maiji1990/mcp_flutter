@@ -47,14 +47,16 @@ Future<void> main(List<String> args) async {
     return result != null;
   });
 
-  await step('tools/list exposes 8 tools', () async {
+  await step('tools/list exposes the Flutter and web tools', () async {
     final tools = await client.listTools();
     final names = tools.map((tool) => tool['name']).toList();
     stdout.writeln('      tools: $names');
-    return names.length == 8 &&
+    return names.length == 15 &&
         names.contains('ui_click') &&
         names.contains('ui_capture') &&
-        names.contains('app_invoke_action');
+        names.contains('app_invoke_action') &&
+        names.contains('web_get_tree') &&
+        names.contains('web_click');
   });
 
   await step('ui_get_current_page', () async {
@@ -193,6 +195,23 @@ Future<void> main(List<String> args) async {
     return payload?['success'] == true;
   });
 
+  await step(
+    'app_invoke_action rejects arguments the schema forbids',
+    () async {
+      final payload = await client.callTool(
+        'app_invoke_action',
+        <String, Object?>{
+          'name': 'demo.increment',
+          'arguments': <String, Object?>{'unexpected': true},
+        },
+      );
+      final error = payload?['error'] as Map<String, dynamic>?;
+      stdout.writeln('      invalid action answer: ${error?['code']}');
+      return payload?['success'] != true &&
+          error?['code'] == 'invalid_argument';
+    },
+  );
+
   await step('app_invoke_action runs the demo action', () async {
     final payload = await client.callTool(
       'app_invoke_action',
@@ -233,6 +252,271 @@ Future<void> main(List<String> args) async {
     return payload == null || payload['success'] != true;
   });
 
+  if (args.contains('--webview-check')) {
+    await step('opens the WebView demo and registers the view', () async {
+      final tree = await client.callTool('ui_get_tree', const {});
+      final data = tree?['data'] as Map<String, dynamic>?;
+      final nodes = (data?['nodes'] as List<Object?>?) ?? const <Object?>[];
+      String? openRef;
+      for (final node in nodes) {
+        final map = node! as Map<String, dynamic>;
+        if (map['label'] == 'Open WebView demo') {
+          openRef = map['ref'] as String?;
+        }
+      }
+      if (openRef == null) {
+        return false;
+      }
+      final opened = await client.callTool('ui_click', <String, Object?>{
+        'ref': openRef,
+        'snapshotId': tree?['snapshotId'],
+      });
+      if (opened?['success'] != true) {
+        return false;
+      }
+      await Future<void>.delayed(const Duration(seconds: 3));
+      final views = await client.callTool('web_list_views', const {});
+      final list =
+          (views?['data']?['views'] as List<Object?>?) ?? const <Object?>[];
+      stdout.writeln('      views: $list');
+      return list.any((view) => view is Map && view['viewId'] == 'order-h5');
+    });
+
+    String? webSnapshot;
+    String? searchRef;
+    await step('web_get_tree reads the H5 DOM and masks the PIN', () async {
+      final tree = await client.callTool('web_get_tree', <String, Object?>{
+        'viewId': 'order-h5',
+      });
+      final data = tree?['data'] as Map<String, dynamic>?;
+      final nodes = (data?['nodes'] as List<Object?>?) ?? const <Object?>[];
+      webSnapshot = tree?['snapshotId'] as String?;
+      final url = data?['url'];
+      if (tree?['success'] != true) {
+        stdout.writeln('      tree error: ${tree?['error']}');
+      }
+
+      for (final node in nodes) {
+        final map = node! as Map<String, dynamic>;
+        if ('${map['label']}'.startsWith('Search order')) {
+          searchRef = map['ref'] as String?;
+        }
+      }
+      final passwordNodes = nodes
+          .cast<Map<String, dynamic>>()
+          .where((node) => node['type'] == 'password')
+          .toList();
+      final masked =
+          passwordNodes.isNotEmpty &&
+          passwordNodes.every((node) => node['value'] == '••••');
+      final leaked = jsonEncode(tree).contains('1234');
+      stdout.writeln(
+        '      url: $url nodes: ${nodes.length} pinMasked: $masked',
+      );
+      return tree?['success'] == true &&
+          url is String &&
+          url.contains('127.0.0.1') &&
+          searchRef != null &&
+          masked &&
+          !leaked;
+    });
+
+    await step('web_set_text fills the search field', () async {
+      final result = await client.callTool('web_set_text', <String, Object?>{
+        'viewId': 'order-h5',
+        'ref': searchRef,
+        'snapshotId': webSnapshot,
+        'text': 'INV-42',
+      });
+      final error = result?['error'] as Map<String, dynamic>?;
+      stdout.writeln('      set_text: ${result?['data'] ?? error}');
+      return result?['success'] == true;
+    });
+
+    String? clickSnapshot;
+    await step('web_click runs the page button', () async {
+      final tree = await client.callTool('web_get_tree', <String, Object?>{
+        'viewId': 'order-h5',
+      });
+      final data = tree?['data'] as Map<String, dynamic>?;
+      final nodes = (data?['nodes'] as List<Object?>?) ?? const <Object?>[];
+      webSnapshot = tree?['snapshotId'] as String?;
+      String? buttonRef;
+      for (final node in nodes) {
+        final map = node! as Map<String, dynamic>;
+        if (map['tag'] == 'button' && map['label'] == 'Search') {
+          buttonRef = map['ref'] as String?;
+        }
+      }
+      if (buttonRef == null) {
+        return false;
+      }
+      clickSnapshot = webSnapshot;
+      final result = await client.callTool('web_click', <String, Object?>{
+        'viewId': 'order-h5',
+        'ref': buttonRef,
+        'snapshotId': webSnapshot,
+      });
+      final error = result?['error'] as Map<String, dynamic>?;
+      stdout.writeln('      click: ${result?['data'] ?? error}');
+      return result?['success'] == true;
+    });
+
+    await step('web_get_tree sees the page result', () async {
+      await Future<void>.delayed(const Duration(milliseconds: 700));
+      final tree = await client.callTool('web_get_tree', <String, Object?>{
+        'viewId': 'order-h5',
+      });
+      final found = jsonEncode(tree).contains('Result for INV-42');
+      stdout.writeln('      result visible: $found');
+      return found;
+    });
+
+    await step('a consumed WebView snapshot cannot be replayed', () async {
+      final replay = await client.callTool('web_click', <String, Object?>{
+        'viewId': 'order-h5',
+        'ref': 'w0_0',
+        'snapshotId': clickSnapshot,
+      });
+      final error = replay?['error'] as Map<String, dynamic>?;
+      stdout.writeln('      replay: ${error?['code']}');
+      return replay?['success'] != true && error?['code'] == 'stale_snapshot';
+    });
+
+    await step('web_set_text drives a controlled input', () async {
+      final tree = await client.callTool('web_get_tree', <String, Object?>{
+        'viewId': 'order-h5',
+      });
+      final data = tree?['data'] as Map<String, dynamic>?;
+      final nodes = (data?['nodes'] as List<Object?>?) ?? const <Object?>[];
+      String? noteRef;
+      for (final node in nodes) {
+        final map = node! as Map<String, dynamic>;
+        if ('${map['label']}' == 'Controlled note') {
+          noteRef = map['ref'] as String?;
+        }
+      }
+      if (noteRef == null) {
+        stdout.writeln('      controlled input not found');
+        return false;
+      }
+      final result = await client.callTool('web_set_text', <String, Object?>{
+        'viewId': 'order-h5',
+        'ref': noteRef,
+        'snapshotId': tree?['snapshotId'],
+        'text': 'hello frame',
+      });
+      final error = result?['error'] as Map<String, dynamic>?;
+      stdout.writeln('      controlled set_text: ${result?['data'] ?? error}');
+      return result?['success'] == true;
+    });
+
+    await step('the controlled view re-rendered from state', () async {
+      await Future<void>.delayed(const Duration(milliseconds: 400));
+      final tree = await client.callTool('web_get_tree', <String, Object?>{
+        'viewId': 'order-h5',
+      });
+      final found = jsonEncode(tree).contains('Model: hello frame');
+      stdout.writeln('      controlled model visible: $found');
+      return tree?['success'] == true && found;
+    });
+
+    String? beforeSpa;
+    await step('web_click follows a SPA History navigation', () async {
+      final tree = await client.callTool('web_get_tree', <String, Object?>{
+        'viewId': 'order-h5',
+      });
+      final data = tree?['data'] as Map<String, dynamic>?;
+      final nodes = (data?['nodes'] as List<Object?>?) ?? const <Object?>[];
+      beforeSpa = tree?['snapshotId'] as String?;
+      String? detailsRef;
+      for (final node in nodes) {
+        final map = node! as Map<String, dynamic>;
+        if ('${map['label']}' == 'Open details') {
+          detailsRef = map['ref'] as String?;
+        }
+      }
+      if (detailsRef == null) {
+        return false;
+      }
+      final result = await client.callTool('web_click', <String, Object?>{
+        'viewId': 'order-h5',
+        'ref': detailsRef,
+        'snapshotId': beforeSpa,
+      });
+      final error = result?['error'] as Map<String, dynamic>?;
+      stdout.writeln('      spa click: ${result?['data'] ?? error}');
+      return result?['success'] == true;
+    });
+
+    await step('the SPA route advanced the epoch and the old ref is stale', () async {
+      await Future<void>.delayed(const Duration(milliseconds: 700));
+      final tree = await client.callTool('web_get_tree', <String, Object?>{
+        'viewId': 'order-h5',
+      });
+      final data = tree?['data'] as Map<String, dynamic>?;
+      final details = jsonEncode(tree).contains('Details page');
+      final epoch = data?['navigationEpoch'] as int? ?? 0;
+      final replay = await client.callTool('web_click', <String, Object?>{
+        'viewId': 'order-h5',
+        'ref': 'w0_0',
+        'snapshotId': beforeSpa,
+      });
+      final replayError = replay?['error'] as Map<String, dynamic>?;
+      final stale = replayError?['code'] == 'stale_snapshot';
+      stdout.writeln(
+        '      spa: url=${data?['url']} epoch=$epoch details=$details stale=$stale',
+      );
+      return tree?['success'] == true && details && epoch >= 2 && stale;
+    });
+
+    await step('a cross-origin iframe is not traversed', () async {
+      final tree = await client.callTool('web_get_tree', <String, Object?>{
+        'viewId': 'order-h5',
+      });
+      final leaked = jsonEncode(tree).contains('Inside frame');
+      stdout.writeln('      iframe content leaked: $leaked');
+      return tree?['success'] == true && !leaked;
+    });
+
+    await step('ui_capture returns the hybrid WebView screen', () async {
+      final capture = await client.callTool('ui_capture', <String, Object?>{
+        'scale': 0.5,
+      });
+      final data = capture?['data'] as Map<String, dynamic>?;
+      final base64 = data?['bytesBase64'] as String?;
+      if (base64 == null) {
+        stdout.writeln('      hybrid capture error: ${capture?['error']}');
+        return false;
+      }
+      final bytes = base64Decode(base64);
+      final isPng = bytes.length > 8 && bytes[0] == 0x89 && bytes[1] == 0x50;
+      final dir = _arg(args, '--capture-dir');
+      if (dir != null) {
+        Directory(dir).createSync(recursive: true);
+        File('$dir/web-demo.png').writeAsBytesSync(bytes);
+      }
+      stdout.writeln(
+        '      hybrid capture: ${data?['width']}x${data?['height']} '
+        '${bytes.length} bytes png=$isPng',
+      );
+      return isPng;
+    });
+
+    await step('web_get_state reports the loopback origin', () async {
+      final state = await client.callTool('web_get_state', <String, Object?>{
+        'viewId': 'order-h5',
+      });
+      final data = state?['data'] as Map<String, dynamic>?;
+      stdout.writeln('      state: $data');
+      return state?['success'] == true &&
+          (data?['url']).toString().contains('127.0.0.1');
+    });
+
+    await Process.run('adb', <String>['shell', 'input', 'keyevent', '4']);
+    await Future<void>.delayed(const Duration(milliseconds: 700));
+  }
+
   if (args.contains('--wallet-check')) {
     await step('capture is refused on a policy-blocked route', () async {
       final tree = await client.callTool('ui_get_tree', const {});
@@ -257,6 +541,14 @@ Future<void> main(List<String> args) async {
       }
       await Future<void>.delayed(const Duration(milliseconds: 500));
 
+      final walletTree = await client.callTool('ui_get_tree', const {});
+      final walletError = walletTree?['error'] as Map<String, dynamic>?;
+      final readBlocked = walletError?['code'] == 'route_denied';
+      final leaked = jsonEncode(walletTree).contains('4111');
+      stdout.writeln(
+        '      wallet read: ${walletError?['code']} leaked=$leaked',
+      );
+
       final capture = await client.callTool(
         'ui_capture',
         const <String, Object?>{},
@@ -264,11 +556,12 @@ Future<void> main(List<String> args) async {
       final error = capture?['error'] as Map<String, dynamic>?;
       stdout.writeln('      capture answer: ${error?['code']}');
       final blocked = error?['code'] == 'route_blocked';
+      final noBytes = !jsonEncode(capture).contains('bytesBase64');
 
       // Back to the demo screen for whoever runs this next.
       await Process.run('adb', <String>['shell', 'input', 'keyevent', '4']);
       await Future<void>.delayed(const Duration(milliseconds: 500));
-      return blocked;
+      return blocked && noBytes && readBlocked && !leaked;
     });
   }
 

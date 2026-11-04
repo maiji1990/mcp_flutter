@@ -2,6 +2,8 @@
 // Copyright (c) 2025, Flutter Inspector MCP Server authors.
 // Licensed under the MIT License.
 
+import 'dart:async';
+
 import 'package:flutter_mcp_toolkit_release/flutter_mcp_toolkit_release.dart';
 
 /// Driver that records calls and can be told how the UI answers.
@@ -23,8 +25,18 @@ final class FakeDriver implements ReleaseUiInteractionDriver {
   final List<(String, String)> typed = <(String, String)>[];
   final List<(String, String, double)> scrolled = <(String, String, double)>[];
 
+  /// Route the fake app reports; null means "cannot say".
+  String? routeName;
+
+  /// When set, `tap` waits for it, so a test can queue a second call behind a
+  /// first one that is still running.
+  Completer<void>? tapGate;
+
   @override
   Future<bool> isSnapshotCurrent(String id) async => id == snapshotId;
+
+  @override
+  Future<String?> currentRouteName() async => routeName;
 
   @override
   Future<ReleaseUiNodeState> inspect(String ref) async =>
@@ -32,6 +44,10 @@ final class FakeDriver implements ReleaseUiInteractionDriver {
 
   @override
   Future<ReleaseDriverResult> tap(String ref) async {
+    final gate = tapGate;
+    if (gate != null) {
+      await gate.future;
+    }
     if (throws) {
       throw StateError('driver blew up');
     }

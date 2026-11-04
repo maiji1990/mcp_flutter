@@ -5,6 +5,7 @@
 // Fork addition (Android release runtime).
 
 import '../errors/release_mcp_error.dart';
+import '../security/call_authorization.dart';
 import '../security/permissions.dart';
 import '../ui/interaction_driver.dart';
 import '../ui/release_ui_types.dart';
@@ -128,15 +129,18 @@ final class ReleaseInteractionTools implements ReleaseToolSurface {
   @override
   Future<ReleaseToolCallResult> call(
     String name,
-    Map<String, Object?> arguments,
-  ) {
+    Map<String, Object?> arguments, {
+    ReleaseCallAuthorization? authorization,
+  }) {
+    final authority =
+        authorization ?? const ReleaseCallAuthorization.unchecked();
     switch (name) {
       case 'ui_click':
-        return _click(arguments);
+        return _click(arguments, authority);
       case 'ui_set_text':
-        return _setText(arguments);
+        return _setText(arguments, authority);
       case 'ui_scroll':
-        return _scroll(arguments);
+        return _scroll(arguments, authority);
       default:
         return Future<ReleaseToolCallResult>.value(
           _refusal(
@@ -148,10 +152,14 @@ final class ReleaseInteractionTools implements ReleaseToolSurface {
     }
   }
 
-  Future<ReleaseToolCallResult> _click(Map<String, Object?> arguments) {
+  Future<ReleaseToolCallResult> _click(
+    Map<String, Object?> arguments,
+    ReleaseCallAuthorization authorization,
+  ) {
     final requestId = _nextRequestId();
     return _execute(
       requestId: requestId,
+      authorization: authorization,
       snapshotId: _readString(arguments, 'snapshotId'),
       action: 'tap',
       validate: () => _validate(
@@ -163,7 +171,10 @@ final class ReleaseInteractionTools implements ReleaseToolSurface {
     );
   }
 
-  Future<ReleaseToolCallResult> _setText(Map<String, Object?> arguments) {
+  Future<ReleaseToolCallResult> _setText(
+    Map<String, Object?> arguments,
+    ReleaseCallAuthorization authorization,
+  ) {
     final requestId = _nextRequestId();
     final text = arguments['text'];
     if (text is! String) {
@@ -178,6 +189,7 @@ final class ReleaseInteractionTools implements ReleaseToolSurface {
 
     return _execute(
       requestId: requestId,
+      authorization: authorization,
       snapshotId: _readString(arguments, 'snapshotId'),
       action: 'setText',
       validate: () => _validate(
@@ -191,7 +203,10 @@ final class ReleaseInteractionTools implements ReleaseToolSurface {
     );
   }
 
-  Future<ReleaseToolCallResult> _scroll(Map<String, Object?> arguments) {
+  Future<ReleaseToolCallResult> _scroll(
+    Map<String, Object?> arguments,
+    ReleaseCallAuthorization authorization,
+  ) {
     final requestId = _nextRequestId();
 
     final directionValue = _readString(arguments, 'direction');
@@ -226,6 +241,7 @@ final class ReleaseInteractionTools implements ReleaseToolSurface {
 
     return _execute(
       requestId: requestId,
+      authorization: authorization,
       snapshotId: _readString(arguments, 'snapshotId'),
       action: 'scroll_${direction.wireName}',
       validate: () => _validate(
@@ -242,12 +258,25 @@ final class ReleaseInteractionTools implements ReleaseToolSurface {
   /// re-validates inside the queue.
   Future<ReleaseToolCallResult> _execute({
     required String requestId,
+    required ReleaseCallAuthorization authorization,
     required String? snapshotId,
     required String action,
     required Future<_Validation> Function() validate,
     required Future<ReleaseDriverResult> Function(ReleaseUiNode node) perform,
   }) {
     final result = _queue.then((_) async {
+      // AUTH-01: consent is re-read at dispatch time, not only when the call
+      // entered the queue. A revoked `ui:interact` — or a stop/restart that
+      // changed the authorization epoch — refuses the queued call.
+      if (!authorization.allows(ReleasePermissionId.uiInteract)) {
+        return _refusal(
+          requestId,
+          ReleaseMcpErrorCode.permissionDenied,
+          'Consent was withdrawn while this call was queued.',
+          snapshotId: snapshotId,
+          details: <String, Object?>{'reason': 'authorization_changed'},
+        );
+      }
       final validation = await validate();
       if (validation is _Invalid) {
         return validation.result;
@@ -338,6 +367,16 @@ final class ReleaseInteractionTools implements ReleaseToolSurface {
     }
     if (!await driver.isSnapshotCurrent(snapshotId)) {
       return _Invalid(_stale(requestId, snapshotId, 'app_moved_on'));
+    }
+
+    // A ref means a position in a snapshot taken on one route. If the app has
+    // navigated since, that position may now hold a different control (UI-01).
+    final expectedRoute = store.snapshotFor(snapshotId)?.routeName;
+    if (expectedRoute != null) {
+      final currentRoute = await driver.currentRouteName();
+      if (currentRoute != null && currentRoute != expectedRoute) {
+        return _Invalid(_stale(requestId, snapshotId, 'route_changed'));
+      }
     }
 
     final node = store.nodeById(snapshotId, ref);

@@ -23,12 +23,18 @@ final class FakeSnapshotSource implements ReleaseUiSnapshotSource {
 
   int captures = 0;
 
+  /// Budget and filter the last call received, for pushdown assertions.
+  int? lastMaxNodes;
+  String? lastIdentifierPrefix;
+
   @override
   Future<ReleaseUiSnapshot> captureSnapshot({
     int? maxNodes,
     String? identifierPrefix,
   }) async {
     captures += 1;
+    lastMaxNodes = maxNodes;
+    lastIdentifierPrefix = identifierPrefix;
     var nodes = _nodes;
     if (identifierPrefix != null) {
       nodes = nodes

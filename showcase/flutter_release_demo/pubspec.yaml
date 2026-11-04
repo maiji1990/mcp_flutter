@@ -14,8 +14,11 @@ environment:
 dependencies:
   flutter:
     sdk: flutter
-  flutter_mcp_toolkit_release: ^0.6.0
-  flutter_mcp_toolkit_release_flutter: ^0.6.0
+  flutter_mcp_toolkit_release: ^0.7.0
+  flutter_mcp_toolkit_release_flutter: ^0.7.0
+  # Optional WebView DOM adapter, exercised by the WebView demo screen.
+  flutter_mcp_toolkit_release_webview: ^0.1.0
+  webview_flutter: ^4.14.1
 
 dev_dependencies:
   flutter_test:

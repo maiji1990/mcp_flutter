@@ -25,11 +25,29 @@ import 'package:mcp_toolkit/mcp_toolkit.dart'
 /// re-checks liveness anyway, so a stale ref is refused twice.
 final class FlutterReleaseUiInteractionDriver
     implements ReleaseUiInteractionDriver {
-  const FlutterReleaseUiInteractionDriver();
+  const FlutterReleaseUiInteractionDriver({this.routeProvider});
+
+  /// Supplies the route the driver reports, so an interaction can prove the app
+  /// is still on the page the snapshot was taken from.
+  final ReleaseRouteProvider? routeProvider;
 
   @override
   Future<bool> isSnapshotCurrent(String snapshotId) async =>
       '${SemanticSnapshotService.currentSnapshotId}' == snapshotId;
+
+  @override
+  Future<String?> currentRouteName() async {
+    final provider = routeProvider;
+    if (provider == null) {
+      return null;
+    }
+    try {
+      return await provider.currentRouteName();
+    } on Object {
+      // A router that throws must not make an unknown route look known.
+      return null;
+    }
+  }
 
   @override
   Future<ReleaseUiNodeState> inspect(String ref) async {

@@ -56,7 +56,10 @@ void main() {
     await tester.pumpAndSettle();
 
     final tools = ReleaseCaptureTools(
-      source: const FlutterReleaseUiCaptureSource(),
+      source: FlutterReleaseUiCaptureSource(
+        routeProvider: CallbackReleaseRouteProvider(() async => '/home'),
+      ),
+      policy: const ReleaseCapturePolicy(allowedRoutes: <String>{'/home'}),
       maxBytes: 5 * 1024 * 1024,
     );
 
@@ -87,7 +90,10 @@ void main() {
       source: FlutterReleaseUiCaptureSource(
         routeProvider: CallbackReleaseRouteProvider(() async => '/wallet'),
       ),
-      policy: const ReleaseCapturePolicy(blockedRoutes: <String>{'/wallet'}),
+      policy: const ReleaseCapturePolicy(
+        allowedRoutes: <String>{'/home', '/wallet'},
+        blockedRoutes: <String>{'/wallet'},
+      ),
     );
 
     final result = await tools.call('ui_capture', <String, Object?>{});

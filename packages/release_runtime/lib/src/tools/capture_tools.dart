@@ -9,6 +9,7 @@ import 'dart:convert';
 import '../capture/capture_policy.dart';
 import '../capture/capture_source.dart';
 import '../errors/release_mcp_error.dart';
+import '../security/call_authorization.dart';
 import '../security/permissions.dart';
 import 'release_tools.dart';
 
@@ -75,8 +76,9 @@ final class ReleaseCaptureTools implements ReleaseToolSurface {
   @override
   Future<ReleaseToolCallResult> call(
     String name,
-    Map<String, Object?> arguments,
-  ) async {
+    Map<String, Object?> arguments, {
+    ReleaseCallAuthorization? authorization,
+  }) async {
     final requestId = 'req_${++_requests}';
     if (name != 'ui_capture') {
       return _refusal(
@@ -128,6 +130,19 @@ final class ReleaseCaptureTools implements ReleaseToolSurface {
       format = parsed;
     }
 
+    if (!(authorization ?? const ReleaseCallAuthorization.unchecked()).allows(
+      ReleasePermissionId.uiCapture,
+    )) {
+      return _refusal(
+        requestId,
+        ReleaseMcpErrorCode.permissionDenied,
+        'Consent for capture was withdrawn.',
+        details: <String, Object?>{
+          'permission': ReleasePermissionId.uiCapture.wireName,
+        },
+      );
+    }
+
     final String? route;
     try {
       route = await source.currentRouteName();
@@ -168,6 +183,42 @@ final class ReleaseCaptureTools implements ReleaseToolSurface {
         requestId,
         ReleaseMcpErrorCode.captureUnavailable,
         'Nothing could be captured right now.',
+      );
+    }
+
+    // The frame was taken while the policy said yes; the screen may have moved
+    // on since. A PNG cannot be un-taken, so the only safe answer is to drop
+    // the bytes and report the race (CAP-02).
+    final String? routeAfter;
+    try {
+      routeAfter = await source.currentRouteName();
+    } catch (error) {
+      return _refusal(
+        requestId,
+        ReleaseMcpErrorCode.captureUnavailable,
+        'The app could not confirm its route after the frame, so the image '
+        'was discarded.',
+        details: <String, Object?>{'cause': error.runtimeType.toString()},
+      );
+    }
+    if (routeAfter != route) {
+      return _refusal(
+        requestId,
+        ReleaseMcpErrorCode.routeChanged,
+        'The screen changed during capture; the image was discarded.',
+        details: <String, Object?>{
+          'routeKnown': route != null && route.trim().isNotEmpty,
+        },
+      );
+    }
+    if (!policy.allows(routeAfter)) {
+      return _refusal(
+        requestId,
+        ReleaseMcpErrorCode.routeBlocked,
+        'Capture is not allowed on this screen.',
+        details: <String, Object?>{
+          'routeKnown': routeAfter != null && routeAfter.trim().isNotEmpty,
+        },
       );
     }
 

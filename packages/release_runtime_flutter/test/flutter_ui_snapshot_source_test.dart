@@ -146,6 +146,42 @@ void main() {
     });
   });
 
+  testWidgets(
+    'AgentSensitive masks its subtree and ExcludeFromAgent hides it',
+    (tester) async {
+      await _withSemantics(tester, () async {
+        await tester.pumpWidget(
+          const MaterialApp(
+            home: Scaffold(
+              body: Column(
+                children: <Widget>[
+                  AgentSensitive(
+                    child: Text('Card number 4111 1111 1111 1111'),
+                  ),
+                  ExcludeFromAgent(child: Text('internal note 999')),
+                ],
+              ),
+            ),
+          ),
+        );
+        await tester.pumpAndSettle();
+
+        final tools = ReleaseReadTools(
+          source: FlutterReleaseUiSnapshotSource(),
+        );
+        final result = await _whilePumping(
+          tester,
+          tools.call('ui_get_tree', <String, Object?>{}),
+        );
+
+        expect(result.success, isTrue);
+        final payload = result.toJson().toString();
+        expect(payload, isNot(contains('4111')));
+        expect(payload, isNot(contains('internal note')));
+      });
+    },
+  );
+
   testWidgets('readCurrentPage does not advance the snapshot id', (
     tester,
   ) async {

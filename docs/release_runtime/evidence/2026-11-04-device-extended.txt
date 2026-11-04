@@ -1,0 +1,76 @@
+# Extended device evidence — 2026-11-04
+
+Continuation of `2026-11-04-device-smoke.txt` on the same Huawei PTP-AN10,
+Android 17 (API 37), release APK. The token is redacted; it is a per-launch
+secret and is never stored here.
+
+## WebView edge cases (all PASS)
+
+- SPA History navigation: `web_click` on "Open details" ran
+  `history.pushState('/details')`; the next `web_get_tree` reported
+  `url=.../details`, `navigationEpoch=2`, and the "Details page" node; the
+  pre-navigation snapshot was refused as `stale_snapshot`.
+- Cross-origin iframe: a sandboxed `srcdoc` iframe (opaque origin) rendered its
+  "Inside frame" button in the hybrid PNG, while `web_get_tree` did not include
+  it (`iframe content leaked: false`).
+- Framework-style controlled input: `web_set_text` on "Controlled note"
+  produced `Model: hello frame`, i.e. the page's state and re-render observed
+  the native-setter + `input` event.
+- Hybrid capture: `ui_capture` on `/web-demo` returned a 640x1400 PNG whose
+  pixels include the WebView/H5 content (verified visually). Platform-view
+  pixels are therefore composited by `RenderView` capture **on this device**;
+  this is not a general guarantee.
+
+## Lifecycle
+
+- Background (HOME): endpoint immediately unreachable; returning to the app
+  shows `Status: paused (app in background)`.
+- Lock screen (power key): endpoint unreachable while locked.
+- Rotation (landscape then portrait): endpoint stayed healthy
+  (`OK flutter_mcp_toolkit_release 0.7.0` both ways).
+- Re-enable after background: a new runtime produced a new token; the old token
+  answered **401**.
+
+## Multi-client (AUTH-02 evidence)
+
+`tool/mcp_multiclient.dart` opened two independent sessions:
+
+```text
+sessions: A=true B=true
+concurrent ui_get_tree: A=true B=true
+app action without per-session grant: A=true B=true (shared runtime grant)
+```
+
+Both clients acted under one runtime-global grant. This is the concrete AUTH-02
+gap: `mcp_server` 3.1.1's `ToolHandler` receives only the argument map, so a
+tool call carries no session id to scope grants or snapshots with.
+
+## Rate limiting and audit (PASS)
+
+- 5 calls: `calls=5 ok=5 rate_limited=0`.
+- 130 calls in the same window: `calls=130 ok=115 rate_limited=15`
+  (demo budget is 120/minute).
+- `adb logcat -s flutter` showed records such as
+  `release-mcp audit {"tool":"ui_get_current_page","allowed":true,
+  "permission":"ui:read","epoch":2}`; no argument values appear.
+
+## Process death
+
+- `am force-stop` → `UNREACHABLE`; relaunch → `Status: off` (the runtime never
+  auto-starts, and the token is not persisted across processes).
+
+## Split / freeform attempt
+
+- `am start --windowingMode 4` and
+  `cmd activity start-activity --windowingMode 3` did not produce a usable
+  split window on this Honor build; the activity was paused and the safety
+  controller stopped the endpoint (`Status: paused (app in background)`).
+  Serving in split screen is therefore unsupported by the current
+  foreground-only policy.
+
+## Not completed in this pass
+
+- Keystore token persistence is not implemented: every re-enable generates a
+  new secret, so process death also rotates the token.
+- Split-screen serving is intentionally unsupported (any pause stops the
+  runtime); a true two-app split was not exercised.

@@ -4,7 +4,10 @@
 //
 // Fork addition (Android release runtime).
 
+import 'dart:convert';
+
 import '../errors/release_mcp_error.dart';
+import '../security/call_authorization.dart';
 import '../tools/release_tools.dart';
 import 'app_action.dart';
 
@@ -21,7 +24,10 @@ import 'app_action.dart';
 /// Calls are serialized: two business actions at once would race on app state
 /// the runtime cannot see.
 final class ReleaseAppActionTools implements ReleaseToolSurface {
-  ReleaseAppActionTools(Iterable<ReleaseAppAction> actions) {
+  ReleaseAppActionTools(
+    Iterable<ReleaseAppAction> actions, {
+    this.maxArgumentBytes = 64 * 1024,
+  }) {
     for (final action in actions) {
       if (_actions.containsKey(action.name)) {
         throw ArgumentError.value(
@@ -36,6 +42,9 @@ final class ReleaseAppActionTools implements ReleaseToolSurface {
 
   /// Wire name of the single tool this surface exposes.
   static const String toolName = 'app_invoke_action';
+
+  /// Largest serialized `arguments` object accepted, before schema validation.
+  final int maxArgumentBytes;
 
   final Map<String, ReleaseAppAction> _actions = <String, ReleaseAppAction>{};
   Future<void> _queue = Future<void>.value();
@@ -77,8 +86,11 @@ final class ReleaseAppActionTools implements ReleaseToolSurface {
   @override
   Future<ReleaseToolCallResult> call(
     String name,
-    Map<String, Object?> arguments,
-  ) {
+    Map<String, Object?> arguments, {
+    ReleaseCallAuthorization? authorization,
+  }) {
+    final authority =
+        authorization ?? const ReleaseCallAuthorization.unchecked();
     final requestId = 'req_${++_requests}';
     if (name != toolName) {
       return Future<ReleaseToolCallResult>.value(
@@ -129,7 +141,48 @@ final class ReleaseAppActionTools implements ReleaseToolSurface {
       );
     }
 
+    if (_serializedLength(callArguments) > maxArgumentBytes) {
+      return Future<ReleaseToolCallResult>.value(
+        _refusal(
+          requestId,
+          ReleaseMcpErrorCode.invalidArgument,
+          'arguments exceed the size budget.',
+          details: <String, Object?>{
+            'maxBytes': maxArgumentBytes,
+            'field': 'arguments',
+          },
+        ),
+      );
+    }
+
+    final validation = action.validate(callArguments);
+    if (!validation.isValid) {
+      return Future<ReleaseToolCallResult>.value(
+        _refusal(
+          requestId,
+          ReleaseMcpErrorCode.invalidArgument,
+          'arguments do not match the action schema.',
+          details: <String, Object?>{
+            'fields': validation.failedFields,
+            'action': action.name,
+          },
+        ),
+      );
+    }
+
     final result = _queue.then((_) async {
+      // AUTH-01: the action's own consent is re-checked at dispatch time.
+      if (!authority.allows(action.permission)) {
+        return _refusal(
+          requestId,
+          ReleaseMcpErrorCode.permissionDenied,
+          'Consent was withdrawn while this call was queued.',
+          details: <String, Object?>{
+            'permission': action.permission.wireName,
+            'reason': 'authorization_changed',
+          },
+        );
+      }
       try {
         final output = await action.handler(callArguments);
         return ReleaseToolCallResult(
@@ -154,6 +207,16 @@ final class ReleaseAppActionTools implements ReleaseToolSurface {
       onError: (Object error, StackTrace stackTrace) {},
     );
     return result;
+  }
+
+  /// Byte size of the encoded arguments, or a value over the budget when the
+  /// map cannot be encoded as JSON.
+  int _serializedLength(Map<String, Object?> arguments) {
+    try {
+      return utf8.encode(jsonEncode(arguments)).length;
+    } on Object {
+      return maxArgumentBytes + 1;
+    }
   }
 
   ReleaseToolCallResult _refusal(

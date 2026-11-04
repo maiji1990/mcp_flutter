@@ -1,14 +1,16 @@
-# Release runtime API (PR-01 … PR-03)
+# Release runtime API (v0.7.0)
 
-Everything below is implemented and covered by tests. MCP tools are the three
-read-only UI tools; interaction, capture, and app actions are PR-04/PR-05.
+Everything below is implemented and covered by tests. The catalog is the four
+Flutter UI groups (read, interaction, app actions, capture), the optional
+`web_*` WebView family, and the runtime's transport/lifecycle surface.
 
 ## Packages
 
 | Package | Contents |
 |---|---|
 | `flutter_mcp_toolkit_release` | Config, lifecycle, consent, bearer auth, HTTP transport, tool catalog, privacy filter. No Flutter SDK dependency. |
-| `flutter_mcp_toolkit_release_flutter` | `FlutterReleaseUiSnapshotSource`: the semantic-tree adapter. Flutter only. |
+| `flutter_mcp_toolkit_release_flutter` | `FlutterReleaseUiSnapshotSource`, the semantic-tree adapter, plus `AgentSensitive` / `ExcludeFromAgent`. Flutter only. |
+| `flutter_mcp_toolkit_release_webview` | Optional WebView DOM adapter: registry, fixed scripts, navigation epochs. Flutter + `webview_flutter`. |
 
 ## `ReleaseMcpRuntime`
 
@@ -48,8 +50,15 @@ Before a call reaches the tool implementation the runtime checks, in order:
 2. the tool exists in the catalog → otherwise `tool_not_found`;
 3. the session holds the tool's permission → otherwise `permission_denied`
    (details name the missing permission);
-4. a handler that throws becomes `unknown_error` with the exception *type*
+4. a dispatch slot is available (at most `maxConcurrentRequests`, at most 16
+   waiting) → otherwise `server_busy`;
+5. a handler that throws becomes `unknown_error` with the exception *type*
    only — never a stack trace.
+
+The call also carries a `ReleaseCallAuthorization`: the epoch it started in and
+a live probe into the grant set. Queues inside a tool re-consult the probe
+immediately before dispatch, so consent withdrawn while a call waited refuses it
+(`permission_denied`, details `reason: authorization_changed`).
 
 Tool-level refusals travel as a normal result with `success: false` and
 `error.code`, which the HTTP transport maps onto MCP `isError: true`.
@@ -139,28 +148,73 @@ ReleaseToolDefinition(
 )
 ```
 
+The schema is compiled when the action is constructed (an unusable schema
+throws `ArgumentError` there) and enforced on every call: type, required and
+extra properties (`additionalProperties: false`), enums, numeric and length
+bounds, nested objects/arrays. Validation runs before the handler; failures are
+`invalid_argument` with `details.fields` (paths only, never values). The
+serialized `arguments` object is capped by `maxArgumentBytes` (64 KiB).
+
 Refusals: `action_not_found` (unregistered — the resolver yields no permission,
 so the surface answers), `invalid_argument` (missing name, non-object
-arguments), `action_failed` (the handler threw; details carry the exception
-type only). Calls are serialized.
+arguments, schema mismatch, oversized arguments), `action_failed` (the handler
+threw; details carry the exception type only), `permission_denied` (the
+`app:<name>` grant was revoked while the call waited). Calls are serialized.
+
+## WebView tools (v0.7.0, optional package)
+
+```dart
+final registry = ReleaseWebViewRegistry()
+  ..register(
+    viewId: 'order-h5',
+    engine: WebViewFlutterEngine(controller),
+    allowedOrigins: const <String>{'https://app.example.com'},
+  );
+
+final tools = ReleaseWebTools(source: WebViewDomReleaseSource(registry));
+```
+
+| Tool | Arguments | Permission | Notes |
+|---|---|---|---|
+| `web_list_views` | — | `web:read` | Only registered views. |
+| `web_get_tree` | `viewId`, `maxNodes` (≤500), `maxDepth` (≤64) | `web:read` | Bounded DOM snapshot; text of secret fields masked. |
+| `web_find_element` | `viewId`, `role`, `tag`, `text` | `web:read` | Up to five matches from a fresh snapshot. |
+| `web_get_state` | `viewId` | `web:read` | Sanitized URL (origin + path), epoch, loading. |
+| `web_click` | `viewId`, `ref`, `snapshotId` | `web:interact` | Dispatches `.click()` inside the page. |
+| `web_set_text` | `viewId`, `ref`, `snapshotId`, `text` (≤4096) | `web:interact` | Uses the prototype setter so frameworks observe it; refuses sensitive fields. |
+| `web_scroll` | `viewId`, `ref`, `snapshotId`, `direction`, `amount` (≤5000) | `web:interact` | Scrolls the page or a scroll container. |
+
+There is no JavaScript-evaluation tool. Snapshot ids are
+`web:<viewId>:<navigationEpoch>:<nonce>`; a ref from another epoch, another
+snapshot, or an unregistered origin is refused. See
+[`webview.md`](webview.md) for the page-side rules and limits.
 
 ## Capture
 
 ```dart
 final tools = ReleaseCaptureTools(
   source: FlutterReleaseUiCaptureSource(routeProvider: myRouteProvider),
-  policy: const ReleaseCapturePolicy(blockedRoutes: <String>{'/wallet'}),
+  policy: const ReleaseCapturePolicy(
+    allowedRoutes: <String>{'/home'},     // capture is opt-in per route
+    blockedRoutes: <String>{'/wallet'},   // and a block always wins
+  ),
   maxBytes: 1536 * 1024,
 );
 ```
 
 `ui_capture` takes `scale` (0.1..3, default 1) and `format` (`png`; `jpeg`
 answers `unsupported_format`). Order of checks: permission `ui:capture` →
-argument validation → route policy → capture → byte budget.
+argument validation → live consent → route policy → capture → route re-read →
+byte budget.
+
+`ReleaseCapturePolicy()` with no arguments captures **nothing**: `allowedRoutes`
+is empty and `allowWhenRouteUnknown` is false. `blockedRoutes` always wins over
+`allowedRoutes`.
 
 | Refusal | When |
 |---|---|
 | `route_blocked` | `ReleaseCapturePolicy` rejects the current route (checked **before** the frame) |
+| `route_changed` | the route changed during capture; the frame is discarded, no bytes are returned |
 | `capture_unavailable` | nothing painted, protected content, or the source threw |
 | `capture_too_large` | encoded image over `maxBytes` (details: size, limit, dimensions) |
 
@@ -191,6 +245,7 @@ store.consumeLatest();        // after a successful interaction
 ```dart
 abstract interface class ReleaseUiInteractionDriver {
   Future<bool> isSnapshotCurrent(String snapshotId);
+  Future<String?> currentRouteName();
   Future<ReleaseUiNodeState> inspect(String ref);
   Future<ReleaseDriverResult> tap(String ref);
   Future<ReleaseDriverResult> setText(String ref, String text);
@@ -234,14 +289,35 @@ tree is not ready.
 ## Privacy
 
 ```dart
+final class ReleaseUiPrivacyPolicy {
+  const ReleaseUiPrivacyPolicy({
+    Set<String> deniedRoutes,     // refuse the page: route_denied
+    Set<String> maskedRoutes,     // keep the tree, mask every field
+    Set<String> deniedIdentifiers,// remove node + subtree
+    Set<String> maskedIdentifiers,
+    Set<String> deniedTypes,
+    bool maskAllValues,
+    bool maskSensitiveLabels = true,
+    bool denyWhenRouteUnknown = false,
+  });
+}
+
 abstract interface class ReleasePrivacyFilter {
-  ReleaseUiSnapshot apply(ReleaseUiSnapshot snapshot);
+  ReleasePrivacyDecision routeDecision(String? routeName);
+  ReleasePrivacyVerdict screen(ReleaseUiSnapshot snapshot); // snapshot or refusal
+  ReleaseUiSnapshot apply(ReleaseUiSnapshot snapshot);      // already-checked path
 }
 ```
 
-`RedactingPrivacyFilter(maxTextLength: 160, maskAllValues: false, maskMarker: '••••')`
-masks the value of every `sensitive` node (and every value when
-`maskAllValues`), and truncates label/value/hint.
+`RedactingPrivacyFilter(maxTextLength: 160, maskAllValues: false,
+maskMarker: '••••', policy: ReleaseUiPrivacyPolicy())` masks `label`,
+`value`, and `hint` of every `sensitive` node, applies the page/node policy,
+and truncates long text. A denied route yields `ReleasePrivacyVerdict.denied`
+(`route_denied`, `reason: sensitive_route`) before any node is serialized.
+
+Widget-level intent lives in `flutter_mcp_toolkit_release_flutter`:
+`AgentSensitive(child: ...)` sets `Semantics.obscured`, and
+`ExcludeFromAgent(child: ...)` removes the subtree from semantics.
 
 ## `ReleaseMcpConfig`
 
@@ -295,6 +371,12 @@ fixed per code, so a failure can never echo request data or a token.
 | `capture_unavailable` | capability | 501 |
 | `capture_too_large` | validation | 413 |
 | `route_blocked` | permission | 403 |
+| `route_denied` | permission | 403 |
+| `route_changed` | state | 409 |
+| `invalid_schema` | config | 400 |
+| `server_busy` | transport | 429 |
+| `origin_denied` | permission | 403 |
+| `view_not_found` | validation | 404 |
 | `unsupported_format` | validation | 415 |
 | `unknown_error` | internal | 500 |
 

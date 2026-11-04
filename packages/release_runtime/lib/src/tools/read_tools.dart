@@ -6,6 +6,7 @@
 
 import '../errors/release_mcp_error.dart';
 import '../privacy/privacy_filter.dart';
+import '../security/call_authorization.dart';
 import '../security/permissions.dart';
 import '../ui/release_ui_types.dart';
 import 'release_tools.dart';
@@ -116,8 +117,9 @@ final class ReleaseReadTools implements ReleaseToolSurface {
   @override
   Future<ReleaseToolCallResult> call(
     String name,
-    Map<String, Object?> arguments,
-  ) {
+    Map<String, Object?> arguments, {
+    ReleaseCallAuthorization? authorization,
+  }) {
     switch (name) {
       case 'ui_get_tree':
         return _getTree(arguments);
@@ -159,9 +161,22 @@ final class ReleaseReadTools implements ReleaseToolSurface {
     }
     final filter = _readString(arguments, 'filter');
 
-    final snapshot = privacy.apply(
-      await source.captureSnapshot(identifierPrefix: filter),
+    // Push the budget into the source: a large tree must not be materialized
+    // only to be thrown away here (UI-02).
+    final raw = await source.captureSnapshot(
+      maxNodes: maxNodesResult.value,
+      identifierPrefix: filter,
     );
+    final verdict = privacy.screen(raw);
+    final snapshot = verdict.snapshot;
+    if (snapshot == null) {
+      return _failure(
+        requestId,
+        verdict.denialCode!,
+        'The app privacy policy refuses to read this screen.',
+        details: <String, Object?>{'reason': ?verdict.reason},
+      );
+    }
 
     final walkOrder = _withinDepth(snapshot.nodes, maxDepthResult.value!);
     final capped = walkOrder.length > maxNodesResult.value!
@@ -220,7 +235,17 @@ final class ReleaseReadTools implements ReleaseToolSurface {
       );
     }
 
-    final snapshot = privacy.apply(await source.captureSnapshot());
+    final raw = await source.captureSnapshot(maxNodes: maxNodesCeiling);
+    final verdict = privacy.screen(raw);
+    final snapshot = verdict.snapshot;
+    if (snapshot == null) {
+      return _failure(
+        requestId,
+        verdict.denialCode!,
+        'The app privacy policy refuses to read this screen.',
+        details: <String, Object?>{'reason': ?verdict.reason},
+      );
+    }
     store?.publish(snapshot);
     final matches = snapshot.nodes
         .where(
