@@ -9,4 +9,4 @@
 ///
 /// Kept in one place so the pubspec version, the handshake, and the docs cannot
 /// disagree. Bump it with `packages/release_runtime/pubspec.yaml`.
-const String kReleaseRuntimeVersion = '0.2.0';
+const String kReleaseRuntimeVersion = '0.3.0';

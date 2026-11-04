@@ -13,6 +13,7 @@ import 'lifecycle/runtime_status.dart';
 import 'security/access_token.dart';
 import 'security/permissions.dart';
 import 'server/http_transport.dart';
+import 'tools/release_tools.dart';
 import 'transport/runtime_transport.dart';
 
 /// Opt-in MCP runtime for shipped Flutter apps.
@@ -37,8 +38,14 @@ final class ReleaseMcpRuntime {
     this.config = const ReleaseMcpConfig(),
     ReleaseRuntimeTransport? transport,
     ReleaseAccessToken? accessToken,
+    ReleaseToolSurface? tools,
   }) : _transport = transport ?? const InertRuntimeTransport(),
-       _accessToken = accessToken ?? ReleaseAccessToken.generate() {
+       _accessToken = accessToken ?? ReleaseAccessToken.generate(),
+       // Kept private on purpose: a public field would let a caller invoke the
+       // surface directly and skip the permission checks in
+       // _GuardedToolSurface.
+       // ignore: prefer_initializing_formals
+       _tools = tools {
     _lifecycle = ReleaseRuntimeLifecycle();
   }
 
@@ -50,22 +57,26 @@ final class ReleaseMcpRuntime {
   factory ReleaseMcpRuntime.http({
     ReleaseMcpConfig config = const ReleaseMcpConfig(),
     ReleaseAccessToken? accessToken,
+    ReleaseToolSurface? tools,
   }) => ReleaseMcpRuntime(
     config: config,
     transport: HttpReleaseRuntimeTransport(),
     accessToken: accessToken,
+    tools: tools,
   );
 
   /// Configuration the runtime was built with.
   final ReleaseMcpConfig config;
 
   final ReleaseRuntimeTransport _transport;
+  final ReleaseToolSurface? _tools;
   ReleaseAccessToken _accessToken;
   late final ReleaseRuntimeLifecycle _lifecycle;
   final StreamController<ReleaseRuntimeStatus> _statusChanges =
       StreamController<ReleaseRuntimeStatus>.broadcast();
 
   ReleasePermissionSet _granted = ReleasePermissionSet.empty;
+  int _toolRequests = 0;
   Uri? _endpoint;
   DateTime? _startedAt;
   bool _disposed = false;
@@ -154,6 +165,9 @@ final class ReleaseMcpRuntime {
           maxRequestBytes: config.maxRequestBytes,
           maxConcurrentRequests: config.maxConcurrentRequests,
           accessToken: _accessToken.value,
+          toolSurface: _tools == null
+              ? null
+              : _GuardedToolSurface(this, _tools),
         ),
       );
 
@@ -322,4 +336,71 @@ final class ReleaseMcpRuntime {
     );
     return result;
   }
+}
+
+/// Wraps a [ReleaseToolSurface] with the runtime's own rules.
+///
+/// The transport never sees the raw surface: state, permission, and error
+/// mapping happen here, so every transport (HTTP today, anything later)
+/// inherits them. Nothing a tool handler throws escapes as a stack trace — it
+/// becomes `unknown_error` plus the exception *type*.
+final class _GuardedToolSurface implements ReleaseToolSurface {
+  _GuardedToolSurface(this._runtime, this._inner);
+
+  final ReleaseMcpRuntime _runtime;
+  final ReleaseToolSurface _inner;
+
+  @override
+  List<ReleaseToolDefinition> get tools => _inner.tools;
+
+  @override
+  Future<ReleaseToolCallResult> call(
+    String name,
+    Map<String, Object?> arguments,
+  ) async {
+    if (_runtime._lifecycle.state != ReleaseRuntimeState.running) {
+      return _refusal(ReleaseMcpErrorCode.runtimeNotRunning);
+    }
+
+    ReleaseToolDefinition? definition;
+    for (final tool in _inner.tools) {
+      if (tool.name == name) {
+        definition = tool;
+        break;
+      }
+    }
+    if (definition == null) {
+      return _refusal(ReleaseMcpErrorCode.toolNotFound);
+    }
+    if (!_runtime._granted.contains(definition.permission)) {
+      return _refusal(
+        ReleaseMcpErrorCode.permissionDenied,
+        details: <String, Object?>{
+          'permission': definition.permission.wireName,
+        },
+      );
+    }
+
+    try {
+      return await _inner.call(name, arguments);
+    } catch (error) {
+      return _refusal(
+        ReleaseMcpErrorCode.unknown,
+        details: <String, Object?>{'cause': error.runtimeType.toString()},
+      );
+    }
+  }
+
+  ReleaseToolCallResult _refusal(
+    String code, {
+    Map<String, Object?> details = const <String, Object?>{},
+  }) => ReleaseToolCallResult(
+    requestId: 'req_${++_runtime._toolRequests}',
+    success: false,
+    error: ReleaseToolError(
+      code,
+      descriptorForReleaseErrorCode(code).message,
+      details: details,
+    ),
+  );
 }

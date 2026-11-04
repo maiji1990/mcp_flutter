@@ -6,6 +6,8 @@
 
 import 'package:meta/meta.dart';
 
+import '../tools/release_tools.dart';
+
 /// Everything a transport needs to bind.
 ///
 /// This is a plain value object so a transport implementation can stay in its
@@ -20,6 +22,7 @@ final class ReleaseTransportStartRequest {
     required this.maxRequestBytes,
     required this.maxConcurrentRequests,
     required this.accessToken,
+    this.toolSurface,
   });
 
   /// Interface to bind.
@@ -47,6 +50,12 @@ final class ReleaseTransportStartRequest {
   /// response.
   final String accessToken;
 
+  /// Tools the transport should register, or null for a tool-less endpoint.
+  ///
+  /// The runtime hands over a permission-checked wrapper, so a transport never
+  /// decides access; it only forwards calls.
+  final ReleaseToolSurface? toolSurface;
+
   /// Same fields as [toJson], but with the secret redacted — safe to log.
   Map<String, Object?> toJson() => <String, Object?>{
     'host': host,
@@ -56,6 +65,9 @@ final class ReleaseTransportStartRequest {
     'maxRequestBytes': maxRequestBytes,
     'maxConcurrentRequests': maxConcurrentRequests,
     'accessToken': '<redacted>',
+    'tools':
+        toolSurface?.tools.map((tool) => tool.name).toList(growable: false) ??
+        const <String>[],
   };
 }
 

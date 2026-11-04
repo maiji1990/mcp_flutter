@@ -1,3 +1,28 @@
+## 0.3.0 — unreleased (fork)
+
+### Added
+
+- Read-only UI tools: `ui_get_tree`, `ui_get_current_page`,
+  `ui_find_element`, all gated on `ui:read`.
+- `ReleaseToolSurface` / `ReleaseToolDefinition` / `ReleaseToolCallResult`:
+  transport-neutral tool catalog and the uniform `{success, requestId,
+  snapshotId, data, error}` envelope.
+- `ReleaseMcpRuntime(tools: …)`: tool calls are guarded by state, catalog
+  membership, and the session's permissions before a handler runs.
+- `ReleaseUiSnapshotSource`, `ReleaseUiNode`, `ReleaseUiSnapshot`,
+  `ReleasePageInfo`: the Flutter-shaped seam and its value types.
+- `ReleasePrivacyFilter` / `RedactingPrivacyFilter`: masks sensitive values,
+  truncates long text, optional blanket value masking.
+- `ReleaseRouteProvider` / `CallbackReleaseRouteProvider`: pluggable page name,
+  independent of Navigator 1.0.
+- `HttpReleaseRuntimeTransport` registers the tool catalog before the socket
+  accepts, and maps `success: false` onto MCP `isError`.
+- New error codes: `tool_not_found`, `element_not_found`,
+  `ambiguous_match`, `invalid_argument`, plus the `validation` category.
+- Flutter adapter package `flutter_mcp_toolkit_release_flutter` reusing
+  `mcp_toolkit`'s `SemanticSnapshotService`, with obscured-node detection and
+  5 widget tests.
+
 ## 0.2.0 — unreleased (fork)
 
 ### Added
@@ -8,39 +33,18 @@
   validation, JSON responses, and no fallback ports.
 - `ReleaseAccessToken`: 256-bit `Random.secure()` token, constant-time
   `matches()`, redacted `toString()`, `Bearer` header helper.
-- `ReleaseMcpRuntime.accessToken` and `rotateAccessToken()` (rotation is
-  stop → rotate → start; see the doc comment).
-- `ReleaseTransportStartRequest.accessToken`, with a redacted `toJson()`.
-- `example/release_http_smoke.dart`: end-to-end handshake you can run on the
-  computer.
-- Tests: initialize + `tools/list` over a real socket, 401 (missing/wrong
-  token), 403 (foreign Origin), 405 (GET), token non-leakage, port release on
-  stop, rotation invalidating the old token, taken-port failure without
-  rebinding.
-
-### Changed
-
-- `ReleaseMcpException` no longer accepts a free-form `message`; the message is
-  fixed per code so a failure can never echo request data.
-- `ReleaseMcpRuntime.config` is a public final field (was a getter).
+- `ReleaseMcpRuntime.accessToken` and `rotateAccessToken()`.
+- Tests: initialize + `tools/list` over a real socket, 401/403/405, token
+  non-leakage, port release, rotation, taken-port failure without rebinding.
 
 ## 0.1.0 — unreleased (fork)
 
 ### Added
 
-- `ReleaseMcpRuntime`: opt-in lifecycle (`start` / `stop` / `dispose`) for an
-  embedded MCP surface in release builds. All three are idempotent and
-  serialized; nothing starts on construction.
-- `ReleaseMcpConfig`: loopback-only bind, endpoint and budget validation, an
-  `enabledOnStartup` hint that never auto-starts, and an explicit
-  `allowNonLoopbackBinding` escape hatch.
-- `ReleaseRuntimeState` / `ReleaseRuntimeLifecycle`: the
-  `disabled → starting → running → stopping → disabled` machine, plus `error`
-  with a recorded error code and a broadcast state stream.
-- `ReleaseMcpErrorCode` / `ReleaseMcpException`: stable codes with categories,
-  retryability, and HTTP-like statuses.
-- `ReleasePermissionId` / `ReleasePermissionSet` / `ReleaseStartAuthorization`:
-  the `ui:read`, `ui:interact`, `ui:capture`, and `app:<name>` consent model.
-- `ReleaseRuntimeTransport` seam plus `InertRuntimeTransport`: the runtime could
-  be wired into an app without opening a socket.
-- `ReleaseRuntimeStatus`: read-only, redaction-safe snapshot stream.
+- `ReleaseMcpRuntime`: opt-in idempotent lifecycle (`start` / `stop` /
+  `dispose`); nothing starts on construction.
+- `ReleaseMcpConfig`: loopback-only bind, endpoint and budget validation.
+- `ReleaseRuntimeState` / `ReleaseRuntimeLifecycle`: state machine + stream.
+- `ReleaseMcpErrorCode` / `ReleaseMcpException`: stable codes, fixed messages.
+- `ReleasePermissionId` / `ReleasePermissionSet` / `ReleaseStartAuthorization`.
+- `ReleaseRuntimeTransport` seam plus `InertRuntimeTransport`.

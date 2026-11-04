@@ -46,6 +46,7 @@ final class ReleaseErrorDescriptor {
 /// Error categories exposed by the release runtime.
 abstract final class ReleaseMcpErrorCategory {
   static const String config = 'config';
+  static const String validation = 'validation';
   static const String permission = 'permission';
   static const String state = 'state';
   static const String transport = 'transport';
@@ -86,6 +87,18 @@ abstract final class ReleaseMcpErrorCode {
 
   /// The runtime has been disposed and cannot be started again.
   static const String runtimeDisposed = 'runtime_disposed';
+
+  /// The tool name is not part of this session's catalog.
+  static const String toolNotFound = 'tool_not_found';
+
+  /// A find query matched no node.
+  static const String elementNotFound = 'element_not_found';
+
+  /// A find query matched more than one node; the caller must narrow it.
+  static const String ambiguousMatch = 'ambiguous_match';
+
+  /// A tool argument was missing, of the wrong type, or out of range.
+  static const String invalidArgument = 'invalid_argument';
 
   /// Catch-all for unexpected failures.
   static const String unknown = 'unknown_error';
@@ -164,6 +177,34 @@ const Map<String, ReleaseErrorDescriptor> _descriptors =
         retryable: false,
         httpLikeStatus: 409,
         message: 'The runtime has been disposed.',
+      ),
+      ReleaseMcpErrorCode.toolNotFound: ReleaseErrorDescriptor(
+        code: ReleaseMcpErrorCode.toolNotFound,
+        category: ReleaseMcpErrorCategory.validation,
+        retryable: false,
+        httpLikeStatus: 404,
+        message: 'That tool is not available in this session.',
+      ),
+      ReleaseMcpErrorCode.elementNotFound: ReleaseErrorDescriptor(
+        code: ReleaseMcpErrorCode.elementNotFound,
+        category: ReleaseMcpErrorCategory.state,
+        retryable: true,
+        httpLikeStatus: 404,
+        message: 'No node matched the query.',
+      ),
+      ReleaseMcpErrorCode.ambiguousMatch: ReleaseErrorDescriptor(
+        code: ReleaseMcpErrorCode.ambiguousMatch,
+        category: ReleaseMcpErrorCategory.validation,
+        retryable: true,
+        httpLikeStatus: 409,
+        message: 'More than one node matched the query.',
+      ),
+      ReleaseMcpErrorCode.invalidArgument: ReleaseErrorDescriptor(
+        code: ReleaseMcpErrorCode.invalidArgument,
+        category: ReleaseMcpErrorCategory.validation,
+        retryable: false,
+        httpLikeStatus: 400,
+        message: 'A tool argument was invalid.',
       ),
       ReleaseMcpErrorCode.unknown: ReleaseErrorDescriptor(
         code: ReleaseMcpErrorCode.unknown,

@@ -1,6 +1,6 @@
 # Release runtime security model
 
-Status: the controls below are **implemented** in PR-01/PR-02 and covered by
+Status: the controls below are **implemented** in PR-01…PR-03 and covered by
 tests. The gaps that must close before an Android release build is called
 "verified" are listed separately — they are not silently assumed.
 
@@ -10,36 +10,50 @@ tests. The gaps that must close before an Android release build is called
 |---|---|
 | Off by default | Construction binds nothing; `start()` is an explicit call. |
 | Loopback-only | `ReleaseMcpConfig.validate()` rejects non-loopback hosts unless `allowNonLoopbackBinding` is set. |
-| Bearer auth on every request | `HttpReleaseRuntimeTransport` passes `authToken` to the SDK transport, which answers 401 before dispatch. Loopback is *not* treated as a trust boundary. |
+| Bearer auth on every request | `HttpReleaseRuntimeTransport` passes `authToken` to the SDK transport, which answers 401 before dispatch. Loopback is *not* a trust boundary. |
 | Constant-time comparison | SDK `_validateBearerToken` + `ReleaseAccessToken.matches`; no byte-by-byte early exit. |
-| Token entropy and handling | 256 bits from `Random.secure()`; header-only (never a query string); `toString()` redacted; excluded from `status`/`config`/`details` JSON; `ReleaseTransportStartRequest.toJson()` redacts it. |
+| Token handling | 256 bits from `Random.secure()`; header-only (never a query string); `toString()` redacted; excluded from `status`/`config`/`details` JSON; `ReleaseTransportStartRequest.toJson()` redacts it. |
 | Token rotation | `rotateAccessToken()` while stopped; the old token is refused after restart (tested). |
 | Origin validation | SDK loopback allow-list, `allowAnyOrigin: false`; foreign `Origin` → 403 (tested). |
 | No wildcard CORS | `CorsConfig(allowOrigin: 'http://<host>')`. |
 | No silent rebinding | `fallbackPorts: const []`; a taken port is a failed start (tested). |
-| Request bounds | Body ceiling, per-request timeout, and max sessions come from config; SDK enforces. |
+| Request bounds | Body ceiling, per-request timeout, and max sessions from config; SDK enforces. |
+| Per-tool permission gate | Every `ReleaseToolDefinition` names a permission; the runtime refuses a call the session does not hold, before the handler runs (tested both ways). |
+| Redaction before serialization | `RedactingPrivacyFilter` masks the value of every `sensitive` node (obscured semantics: passwords, OTPs), can mask all values, and truncates long text. Tested through a widget-test app and over HTTP. |
+| Node budgets | `maxNodes` ≤ 500 and `maxDepth` ≤ 64 clamped in the runtime, so a client cannot request a tree that stalls the UI isolate. |
 | Read-only session | Only `ui:read` is granted implicitly; interaction, capture, and app actions need consent. |
 | No silent downgrade | `readOnlyByDefault: false` + missing authorization → `authorization_missing`. |
 | Consent withdrawal | `revokePermissions()`; `ui:read` is structural, so end the session with `stop()`. |
-| No secret leakage in errors | Messages are fixed per code; details carry field names and error *types* only. |
-| No debug capabilities | No eval, no hot reload, no arbitrary file IO, no shell — absent by construction, not by policy. |
+| No secret leakage in errors | Messages are fixed per code; details carry field names, counts, refs, and error *types* only. A throwing handler becomes `unknown_error` without a stack trace or message text (tested). |
+| No debug capabilities | No eval, no hot reload, no arbitrary file IO, no shell — absent by construction. |
 
-## Still required before a device build may listen (PR-03+ / PR-06)
+## Redaction limits (documented, not hidden)
+
+`sensitive` is derived from `SemanticsFlag.isObscured`, which Flutter sets for
+`TextField(obscureText: true)` and anything else that marks its semantics
+obscured. A custom widget that renders a secret without that flag is **not**
+detectable from the tree; use `RedactingPrivacyFilter(maskAllValues: true)` as
+a blanket policy, or mark the widget's semantics in the app.
+
+Screenshots are a different problem: pixels cannot be redacted by a JSON filter.
+Capture is not implemented yet (PR-05), and when it lands it must refuse capture
+on sensitive routes or mask before encoding.
+
+## Still required before a device build may listen (PR-04+ / PR-06)
 
 - **Keystore-backed token storage.** The token lives in memory today. Persisting
-  it across launches (so a client does not need a new pairing code every start)
-  needs an Android Keystore-backed store behind a small interface; a plain
-  `SharedPreferences` write would put the secret in app-readable storage.
+  it across launches needs an Android Keystore-backed store behind a small
+  interface; `SharedPreferences` would put the secret in app-readable storage.
 - **Revocation UI semantics.** Rotation is stop → rotate → start; a "revoke
-  access" button should also drop the persisted token and stop the runtime.
+  access" action should also drop any persisted token and stop the runtime.
 - **Rate limiting.** The SDK ships a rate limiter, but the runtime does not wire
-  it yet: a local client can issue requests as fast as the timeout allows. Add
-  a per-session budget and map exhaustion to 429.
-- **Audit log.** No call log exists yet. When the tool catalog lands, log tool
+  it yet: a local client can issue requests as fast as the timeout allows.
+- **Audit log.** No call log exists yet. When interaction tools land, log tool
   name, session id, permission decision, and argument *shapes* (never values),
   with the token redacted.
-- **Screenshot redaction.** `ui_capture` (PR-05) cannot be made safe by JSON
-  redaction; sensitive routes must refuse capture or be masked before encoding.
+- **Snapshot-scoped refs for interactions.** PR-03 tools are read-only; PR-04
+  must require `snapshotId` on every mutating call and re-validate the node
+  after queueing it.
 - **Device test matrix.** No Android device run yet: foreground/background
   transitions, rotation, dialogs, back navigation, process death, and the
   minimum supported API level are all unverified.

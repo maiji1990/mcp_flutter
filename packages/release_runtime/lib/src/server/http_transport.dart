@@ -6,6 +6,8 @@
 // `mcp_server` package for the Streamable HTTP protocol implementation; this
 // file owns only the release-specific policy around it.
 
+import 'dart:convert';
+
 import 'package:mcp_server/mcp_server.dart' as mcp;
 
 import '../errors/release_mcp_error.dart';
@@ -67,6 +69,31 @@ final class HttpReleaseRuntimeTransport implements ReleaseRuntimeTransport {
         maxConnections: request.maxConcurrentRequests,
       ),
     );
+
+    // Tools are registered before the socket starts accepting, so the first
+    // `tools/list` a client sends already sees the full catalog.
+    final surface = request.toolSurface;
+    if (surface != null) {
+      for (final tool in surface.tools) {
+        server.addTool(
+          name: tool.name,
+          description: tool.description,
+          inputSchema: tool.inputSchema,
+          handler: (arguments) async {
+            final result = await surface.call(
+              tool.name,
+              arguments.cast<String, Object?>(),
+            );
+            return mcp.CallToolResult(
+              content: <mcp.ContentBlock>[
+                mcp.TextContent(text: jsonEncode(result.toJson())),
+              ],
+              isError: !result.success,
+            );
+          },
+        );
+      }
+    }
 
     final transport = mcp.StreamableHttpServerTransport(
       config: mcp.StreamableHttpServerConfig(

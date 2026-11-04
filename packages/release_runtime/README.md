@@ -7,11 +7,11 @@ Service. This package is the other half of the story: a guarded MCP surface that
 lives inside a *release* build — loopback HTTP, bearer token, no VM Service, no
 service extensions, no Dart eval, no hot reload.
 
-> **Status: PR-01 + PR-02 of the fork plan.** Configuration, lifecycle, consent,
-> bearer authentication, and a Streamable HTTP endpoint are implemented and
-> tested. The tool catalog (semantic snapshot, interactions, app actions,
-> capture) is PR-03+, so `tools/list` is currently empty by design. See
-> [`docs/release_runtime/README.md`](../../docs/release_runtime/README.md).
+> **Status: PR-01 … PR-03 of the fork plan.** Configuration, lifecycle, consent,
+> bearer authentication, the Streamable HTTP endpoint, and three read-only UI
+> tools are implemented and tested. The Flutter side (the actual semantics walk)
+> lives in [`flutter_mcp_toolkit_release_flutter`](../release_runtime_flutter).
+> Interaction, capture, and app actions are PR-04/PR-05.
 
 ## Why a separate package
 
@@ -23,84 +23,70 @@ service extensions, no Dart eval, no hot reload.
 | Default | on with the debug binding | **off**, loopback-only, read-only |
 | Extras | eval, hot reload, extensions | none, by construction |
 
-Keeping them apart means a release build cannot accidentally inherit a debug
-capability, and the debug path keeps its current behaviour untouched.
-
-## Quick start
+## Wiring it into an app
 
 ```dart
 import 'package:flutter_mcp_toolkit_release/flutter_mcp_toolkit_release.dart';
+import 'package:flutter_mcp_toolkit_release_flutter/flutter_mcp_toolkit_release_flutter.dart';
 
 final runtime = ReleaseMcpRuntime.http(
-  config: const ReleaseMcpConfig(
-    host: '127.0.0.1',
-    port: 8765,
-    endpoint: '/mcp',
-    enabledOnStartup: false,
-    readOnlyByDefault: true,
+  config: const ReleaseMcpConfig(port: 8765, endpoint: '/mcp'),
+  tools: ReleaseReadTools(
+    source: FlutterReleaseUiSnapshotSource(
+      routeProvider: CallbackReleaseRouteProvider(() async => myRouter.path),
+    ),
   ),
 );
 
-// Nothing is bound yet: constructing a runtime has no side effects.
-// Show runtime.accessToken to the user as the pairing code when they enable
-// "allow local AI access".
-
+// Nothing is bound yet. Show runtime.accessToken as the pairing code when the
+// user enables "allow local AI access", then:
 await runtime.start(
   authorization: ReleaseStartAuthorization.readOnly(reason: 'user enabled'),
 );
-// -> http://127.0.0.1:8765/mcp, Authorization: Bearer <runtime.accessToken.value>
-
-await runtime.stop();
-await runtime.dispose();
 ```
 
-`start`, `stop`, and `dispose` are idempotent and serialized; concurrent calls
-never interleave a transport handoff.
+A client then talks MCP to `http://127.0.0.1:8765/mcp` with
+`Authorization: Bearer <token>`, and `tools/list` shows `ui_get_tree`,
+`ui_get_current_page`, `ui_find_element`.
+
+## Tools (v1)
+
+| Tool | Permission | What it returns |
+|---|---|---|
+| `ui_get_tree` | `ui:read` | Flat semantic node list with refs, budgets (`maxNodes`/`maxDepth`), `truncated` flag |
+| `ui_get_current_page` | `ui:read` | Route name, interaction surface, node count |
+| `ui_find_element` | `ui:read` | Exactly one match by identifier/label/role, or a refusal |
+
+Refusals are `success: false` payloads with stable codes
+(`invalid_argument`, `element_not_found`, `ambiguous_match`, `permission_denied`,
+…), not protocol errors, so a client can correct itself.
 
 ## Guarantees this package enforces
 
-- **No side effects on construction.** Import the package, construct a runtime,
-  and nothing binds, listens, or starts. `enabledOnStartup` is a hint for the
-  host app, not an auto-start.
+- **No side effects on construction.** Nothing binds, listens, or starts;
+  `enabledOnStartup` is a hint for the host app.
 - **Loopback by default.** A non-loopback `host` fails validation unless
-  `allowNonLoopbackBinding` is explicitly set. `host:port` strings and URL
-  spellings are rejected rather than silently re-bound.
-- **Authentication is mandatory.** Every request needs
-  `Authorization: Bearer <token>`; the SDK compares it in constant time and
-  answers 401 before dispatch. The token comes from `Random.secure()`, is
-  redacted in `toString()`, and never appears in status JSON or a URL.
-- **Origin is validated.** The SDK's loopback-only Origin allow-list stays on
-  (`allowAnyOrigin: false`), so a remote page cannot drive the app through DNS
-  rebinding; a foreign `Origin` gets 403.
-- **No wildcard CORS.** `Access-Control-Allow-Origin` names the loopback origin.
-- **No silent rebinding.** `fallbackPorts` is empty: a taken port is
-  `transport_start_failed`, not `port + 1`.
-- **Read-only by default.** `ui:read` is granted by starting. `ui:interact`,
-  `ui:capture`, and every `app:<name>` permission require an explicit
-  `ReleaseStartAuthorization`.
-- **No silent downgrade.** When `readOnlyByDefault` is false, starting without
-  consent fails with `authorization_missing` instead of quietly serving
-  read-only.
-- **Stable error codes.** Every failure is a `ReleaseMcpException` carrying a
-  code from `ReleaseMcpErrorCode` plus a fixed, non-sensitive message.
+  `allowNonLoopbackBinding` is set; `host:port` strings are rejected.
+- **Authentication is mandatory.** `Authorization: Bearer <token>` on every
+  request; the token comes from `Random.secure()`, is redacted in
+  `toString()`, and never appears in status JSON or a URL.
+- **Origin is validated.** SDK loopback allow-list, `allowAnyOrigin: false`.
+- **No wildcard CORS, no silent rebinding** (`fallbackPorts: const []`).
+- **Read-only by default.** `ui:interact`, `ui:capture`, and `app:<name>`
+  require explicit `ReleaseStartAuthorization` grants.
+- **Every tool call is permission-checked** by the runtime before the handler
+  runs; a handler that throws becomes `unknown_error` plus an exception type.
+- **No node text without redaction.** Sensitive nodes (obscured semantics) are
+  masked by `RedactingPrivacyFilter`; long text is truncated.
+- **Stable error codes** with fixed, non-sensitive messages.
 
 ## Verifying it works
 
 ```bash
-dart test packages/release_runtime
+dart test packages/release_runtime                    # 79 tests
+flutter test packages/release_runtime_flutter         # 5 widget tests
 dart run packages/release_runtime/example/release_http_smoke.dart
 ```
-
-The smoke run prints a real handshake: `401` without a token, `initialize` with
-a session id, `tools/list` → `{"tools":[]}`, then the port is released on stop.
-
-The MCP protocol itself (initialize, sessions, protocol-version negotiation,
-batching) is implemented by the published `mcp_server` package, not by this
-package.
-
-## Public API
-
-See [`docs/release_runtime/api.md`](../../docs/release_runtime/api.md).
 
 ## Platform note
 

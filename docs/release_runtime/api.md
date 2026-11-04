@@ -1,7 +1,14 @@
-# `flutter_mcp_toolkit_release` API (PR-01 + PR-02)
+# Release runtime API (PR-01 … PR-03)
 
-Everything below is implemented and covered by `dart test`. The MCP tools
-themselves are PR-03+, so `tools/list` is currently empty.
+Everything below is implemented and covered by tests. MCP tools are the three
+read-only UI tools; interaction, capture, and app actions are PR-04/PR-05.
+
+## Packages
+
+| Package | Contents |
+|---|---|
+| `flutter_mcp_toolkit_release` | Config, lifecycle, consent, bearer auth, HTTP transport, tool catalog, privacy filter. No Flutter SDK dependency. |
+| `flutter_mcp_toolkit_release_flutter` | `FlutterReleaseUiSnapshotSource`: the semantic-tree adapter. Flutter only. |
 
 ## `ReleaseMcpRuntime`
 
@@ -10,72 +17,98 @@ ReleaseMcpRuntime({
   ReleaseMcpConfig config = const ReleaseMcpConfig(),
   ReleaseRuntimeTransport? transport,
   ReleaseAccessToken? accessToken,
+  ReleaseToolSurface? tools,
 })
 
 factory ReleaseMcpRuntime.http({
   ReleaseMcpConfig config = const ReleaseMcpConfig(),
   ReleaseAccessToken? accessToken,
+  ReleaseToolSurface? tools,
 })
 ```
 
 Construction binds nothing, starts nothing, and reads no platform state.
-`ReleaseMcpRuntime.http` is the release-ready shape: it wires
-`HttpReleaseRuntimeTransport` (Streamable HTTP over loopback).
 
 | Member | Contract |
 |---|---|
 | `config` | Public final field: the configuration the runtime was built with. |
-| `state` | Current `ReleaseRuntimeState`. |
-| `stateChanges` | Broadcast `Stream<ReleaseRuntimeState>`, emitted after commit. |
-| `status` | Read-only `ReleaseRuntimeStatus` snapshot. |
-| `statusChanges` | Broadcast `Stream<ReleaseRuntimeStatus>`. |
-| `accessToken` | The bearer secret; `toString()` is redacted. |
-| `isDisposed` | True after `dispose()`. |
-| `start({authorization})` | `Future<ReleaseRuntimeStatus>`. Idempotent. |
-| `stop()` | `Future<ReleaseRuntimeStatus>`. Idempotent; safe from `error`. |
-| `grantPermissions(ids)` | Adds consent while running. |
-| `revokePermissions(ids)` | Withdraws consent while running; `ui:read` stays. |
+| `state` / `stateChanges` | Lifecycle state and its broadcast stream. |
+| `status` / `statusChanges` | Redaction-safe snapshot and its stream. |
+| `accessToken` | Bearer secret; `toString()` is redacted. |
+| `start({authorization})` / `stop()` / `dispose()` | Idempotent, serialized. |
+| `grantPermissions(ids)` / `revokePermissions(ids)` | Consent changes while running. |
 | `rotateAccessToken()` | New token; only while `disabled`. |
-| `dispose()` | Idempotent teardown; never throws. |
 
-### `start` semantics
+### Tool calls
 
-1. Disposed runtime → `runtime_disposed`.
-2. Already `running` → returns the current status, transport untouched.
-3. Invalid config → `invalid_config` with the failed `problems`; state stays
-   `disabled`, transport untouched.
-4. `readOnlyByDefault: false` and no `authorization` → `authorization_missing`.
-5. Effective permissions are `{ui:read} ∪ authorization.grantedPermissions`.
-6. The transport is handed host/port/endpoint/timeouts **and the bearer token**.
-7. Transport throws → state `error`, code `transport_start_failed`, session
-   cleared, `ReleaseMcpException` rethrown.
+If `tools` is supplied, `start()` hands the transport a **guarded** surface.
+Before a call reaches the tool implementation the runtime checks, in order:
 
-Concurrent `start` / `stop` calls are queued: five simultaneous `start()` calls
-produce exactly one transport start.
+1. state is `running` → otherwise `runtime_not_running`;
+2. the tool exists in the catalog → otherwise `tool_not_found`;
+3. the session holds the tool's permission → otherwise `permission_denied`
+   (details name the missing permission);
+4. a handler that throws becomes `unknown_error` with the exception *type*
+   only — never a stack trace.
 
-### `stop` / `dispose` / rotation
+Tool-level refusals travel as a normal result with `success: false` and
+`error.code`, which the HTTP transport maps onto MCP `isError: true`.
 
-`stop` is a no-op while `disabled`; from `error` it re-enters `stopping` and
-lands in `disabled` with the error code cleared, releasing the port.
-`dispose` stops the transport, clears the session, closes both streams, and
-never throws.
+## Read tools (v1)
 
-Rotation is `stop()` → `rotateAccessToken()` → `start()`. While running it
-throws `invalid_state_transition` (`reason: rotation_requires_stopped`): the
-transport captured the old token when it bound, and rebinding under a live
-client would either keep the old secret alive or break the endpoint.
+| Tool | Arguments | Permission | Notes |
+|---|---|---|---|
+| `ui_get_tree` | `filter`, `maxNodes` (≤500), `maxDepth` (≤64) | `ui:read` | Flat node list in walk order; `truncated` when a budget bites. |
+| `ui_get_current_page` | — | `ui:read` | Route name (if a provider is wired), surface, node count. Uses `peek`, so it never advances the snapshot id. |
+| `ui_find_element` | `identifier`, `label`, `role` | `ui:read` | Exactly one match or a refusal; labels match case-insensitively. |
 
-## `ReleaseAccessToken`
+Every result carries `requestId`, `success`, `snapshotId` when applicable,
+`data`, and `error` (`code`, `message`, `details`) on refusal.
 
-256 bits from `Random.secure()`, base64url without padding (43 chars).
+Refusal codes: `invalid_argument`, `element_not_found`, `ambiguous_match`
+(details list candidate refs), `tool_not_found`, `permission_denied`,
+`runtime_not_running`, `unknown_error`.
 
-| Member | Contract |
-|---|---|
-| `value` | The secret. Never log it, never put it in a URL. |
-| `issuedAt` | UTC mint time, for the audit trail. |
-| `authorizationHeader` | `Bearer <value>`. |
-| `matches(candidate)` | Constant-time comparison. |
-| `toString()` | `ReleaseAccessToken(issuedAt: …, value: <redacted>)`. |
+## UI value types
+
+`ReleaseUiNode` — `ref`, `id`, `type`, `identifier`, `label`, `value`,
+`hint`, `actions`, `children`, `enabled`/`focused`/`checked`/`toggled`/
+`selected`, `visibleInViewport`, `centerInViewport`, `bounds`, and the
+release-only `sensitive`.
+
+`ReleaseUiSnapshot` — `snapshotId`, `nodes`, `capturedAt`, `truncated`,
+`interactionSurface`, `routeName`.
+
+`ReleasePageInfo` — `snapshotId`, `routeName`, `interactionSurface`,
+`nodeCount`, `capturedAt`.
+
+`ReleaseRouteProvider` — `Future<String?> currentRouteName()`; backed by
+whatever router the app uses (`CallbackReleaseRouteProvider` adapts a function).
+
+## `ReleaseUiSnapshotSource`
+
+```dart
+abstract interface class ReleaseUiSnapshotSource {
+  Future<ReleaseUiSnapshot> captureSnapshot({int? maxNodes, String? identifierPrefix});
+  Future<ReleasePageInfo> readCurrentPage();
+}
+```
+
+The one Flutter-shaped seam. Implementations must not retain `SemanticsNode`
+objects beyond a capture and must return an empty snapshot, not throw, when the
+tree is not ready.
+
+## Privacy
+
+```dart
+abstract interface class ReleasePrivacyFilter {
+  ReleaseUiSnapshot apply(ReleaseUiSnapshot snapshot);
+}
+```
+
+`RedactingPrivacyFilter(maxTextLength: 160, maskAllValues: false, maskMarker: '••••')`
+masks the value of every `sensitive` node (and every value when
+`maskAllValues`), and truncates label/value/hint.
 
 ## `ReleaseMcpConfig`
 
@@ -91,14 +124,7 @@ client would either keep the old secret alive or break the endpoint.
 | `requestTimeout` | `30 s` | `> 0` and `<= 5 min`; enforced by the transport. |
 | `maxConcurrentRequests` | `4` | `1..64`; becomes the SDK's max concurrent sessions. |
 
-`validate()` returns every violated rule as `ReleaseConfigProblem(field, code)`
-in a stable order; `isValid` is the boolean shortcut. `toJson()` is
-redaction-safe (no token, no secret).
-
-## `ReleaseRuntimeState`
-
-`disabled`, `starting`, `running`, `stopping`, `error` — each with a stable
-`wireName`, plus `isTransitional` and `isServing`.
+## Lifecycle
 
 ```
 disabled → starting → running → stopping → disabled
@@ -106,45 +132,33 @@ disabled → starting → running → stopping → disabled
               error ←────┴─────────┘      (error → disabled | starting | stopping)
 ```
 
-Illegal transitions throw `StateError`: they are programming errors, not
-recoverable conditions.
+Illegal transitions throw `StateError`: they are programming errors.
 
 ## Errors
 
-`ReleaseMcpException(code, {problems, details})`, `toJson()` yields `code`,
-`message`, `category`, `retryable`, `httpLikeStatus`, `problems`, `details`.
+`ReleaseMcpException(code, {problems, details})` — `code`, `message`,
+`category`, `retryable`, `httpLikeStatus`, `problems`, `details`. Messages are
+fixed per code, so a failure can never echo request data or a token.
 
-The message is fixed per code: callers cannot supply prose, so a failure can
-never echo request data or a token. Structured, non-sensitive breadcrumbs go in
-`details` (field names, error *types*) and `problems`.
+| Code | Category | HTTP-like |
+|---|---|---|
+| `invalid_config` | config | 400 |
+| `invalid_argument` | validation | 400 |
+| `invalid_permission_id` | permission | 400 |
+| `authorization_missing` | permission | 403 |
+| `permission_denied` | permission | 403 |
+| `invalid_state_transition` | state | 409 |
+| `ambiguous_match` | validation | 409 |
+| `element_not_found` | state | 404 |
+| `tool_not_found` | validation | 404 |
+| `transport_start_failed` | transport | 503 |
+| `transport_stop_failed` | transport | 503 |
+| `runtime_not_running` | state | 409 |
+| `runtime_disposed` | state | 409 |
+| `unknown_error` | internal | 500 |
 
-| Code | Category | Retryable | HTTP-like |
-|---|---|---|---|
-| `invalid_config` | config | no | 400 |
-| `invalid_permission_id` | permission | no | 400 |
-| `authorization_missing` | permission | no | 403 |
-| `permission_denied` | permission | no | 403 |
-| `invalid_state_transition` | state | no | 409 |
-| `transport_not_configured` | transport | no | 501 |
-| `transport_start_failed` | transport | yes | 503 |
-| `transport_stop_failed` | transport | yes | 503 |
-| `runtime_not_running` | state | no | 409 |
-| `runtime_disposed` | state | no | 409 |
-| `unknown_error` | internal | no | 500 |
-
-Wire-level refusals from the transport are HTTP statuses, not these codes:
-401 (missing/wrong bearer), 403 (foreign `Origin`), 405 (GET), 413 (body over
-the ceiling).
-
-## Permissions
-
-`ui:read` · `ui:interact` · `ui:capture` · `app:<name>` where `<name>` matches
-`^[a-z][a-z0-9._-]{0,63}$`.
-
-`ReleasePermissionSet` is an immutable set with `union`, `difference`,
-`contains`, `isReadOnly`, and a sorted `toWireList()` for stable JSON.
-`ReleaseStartAuthorization` carries the grants (plus an optional `reason` and
-`issuedAt` for the audit trail).
+HTTP-level refusals come from the transport: 401 (bearer), 403 (foreign
+`Origin`), 405 (GET), 413 (body over the ceiling).
 
 ## Transports
 
@@ -156,9 +170,8 @@ abstract interface class ReleaseRuntimeTransport {
 ```
 
 `ReleaseTransportStartRequest` carries host, port, endpoint, timeout, body
-ceiling, concurrency ceiling, and `accessToken`; its `toJson()` redacts the
-token. Return the bound base URI, or `null` when the transport reserves no
-endpoint.
+ceiling, concurrency ceiling, `accessToken`, and the guarded `toolSurface`; its
+`toJson()` redacts the token and lists tool names only.
 
 | Transport | Use |
 |---|---|
@@ -169,11 +182,11 @@ endpoint.
 
 | Concern | Setting |
 |---|---|
-| Protocol | `mcp_server` 3.1.1 `StreamableHttpServerTransport` (sessions, version negotiation, 2026-07-28 stateless path) |
+| Protocol | `mcp_server` 3.1.1 `StreamableHttpServerTransport` |
 | Fallback ports | `const []` — a taken port fails the start |
 | Auth | `authToken` = the runtime's bearer token; 401 before dispatch |
 | Origin | SDK loopback allow-list; `allowAnyOrigin: false`; foreign Origin → 403 |
 | CORS | `Access-Control-Allow-Origin: http://<bound host>` (never `*`) |
-| Responses | `isJsonResponseEnabled: true` (one request, one response) |
+| Responses | `isJsonResponseEnabled: true` |
 | GET stream | `enableGetStream: false` → 405 |
-| Bounds | Request size, timeout, and session count from `ReleaseMcpConfig` |
+| Tools | Registered before the socket accepts; each call goes through the runtime's guard |
