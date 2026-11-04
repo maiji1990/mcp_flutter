@@ -4,6 +4,24 @@ This repository is a fork of `Arenukvern/mcp_flutter`. The fork's value is the
 android-release runtime patch; everything else should keep flowing from
 upstream.
 
+## Hard rule: never open a pull request against upstream
+
+**No PR, no patch submission, no issue-with-patch to
+`Arenukvern/mcp_flutter` — ever.** The release runtime is fork-only product
+work (embedded HTTP server, consent model, device policy). It is not an upstream
+contribution, and offering it upstream would put the fork's security posture
+under someone else's review cadence while it is still moving.
+
+This applies to every agent and human working in this repository:
+
+- push only to `origin` (the fork);
+- pull from `upstream` read-only, to keep `main` a mirror;
+- if a piece is genuinely upstream-shaped (for example a generic semantics or
+  gesture interface), stop and ask the repository owner first. Do not open the
+  PR yourself, and do not "prepare" one by pushing a branch to upstream.
+
+There is no exception for docs, CI, or "tiny" fixes.
+
 ## Branch model
 
 ```
