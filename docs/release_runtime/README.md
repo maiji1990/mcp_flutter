@@ -20,7 +20,7 @@ hot reload. None of that exists in a release build, and none of it should.
 | 03 | Semantic snapshot, refs, redaction, read tools | **landed** (widget tests; no device yet) |
 | 04 | Guarded interactions (mandatory `snapshotId`) | not started |
 | 05 | App action registry + optional capture | **landed** |
-| 06 | Android E2E, docs, compatibility matrix | not started |
+| 06 | Android E2E, docs, compatibility matrix | **landed** (release APK on Android 17) |
 
 ## Business actions and capture
 

@@ -9,4 +9,5 @@ workspace:
   - mcp_server_dart
   - jaspr_web_example
   - showcase/drivers
+  - showcase/flutter_release_demo
 

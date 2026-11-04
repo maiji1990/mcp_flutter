@@ -46,6 +46,26 @@ Screenshots are a different problem: pixels cannot be redacted by a JSON filter.
 Capture is not implemented yet (PR-05), and when it lands it must refuse capture
 on sensitive routes or mask before encoding.
 
+## Verified on a device (PR-06)
+
+A release APK (`flutter build apk --release`, Flutter 3.47.9) was installed on a
+Huawei PTP-AN10 / Android 17 (API 37) and driven from a computer over
+`adb forward`:
+
+- nothing answers before the user enables access; a request without the bearer
+  token answers 401;
+- `initialize` reports `flutter_mcp_toolkit_release 0.6.0`; `tools/list` shows
+  the eight tools;
+- `ui_get_tree`, `ui_click` (counter changed), `ui_set_text` (value read back),
+  `ui_scroll`, `app_invoke_action`, and `ui_capture` (512x1120 PNG) all worked;
+- `ui_capture` answered `route_blocked` on the demo's `/wallet` screen;
+- a click without `snapshotId` was refused.
+
+Device testing also found a real defect: the server capped MCP *sessions* by
+`maxConcurrentRequests` (4), so the fifth client run was refused with "Too many
+sessions". Sessions now have their own budget (`maxSessions`, default 32) and an
+idle timeout (10 minutes), with a regression test that opens six sessions.
+
 ## Still required before a device build may listen (PR-04+ / PR-06)
 
 - **Keystore-backed token storage.** The token lives in memory today. Persisting

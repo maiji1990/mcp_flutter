@@ -1,0 +1,26 @@
+name: flutter_release_demo
+description: >-
+  Release-build demo for flutter_mcp_toolkit_release: a shipped-looking app
+  whose UI an MCP client can observe and drive over loopback HTTP.
+publish_to: 'none'
+version: 0.1.0
+
+resolution: workspace
+
+environment:
+  sdk: '>=3.13.0 <4.0.0'
+  flutter: '>=3.44.0'
+
+dependencies:
+  flutter:
+    sdk: flutter
+  flutter_mcp_toolkit_release: ^0.6.0
+  flutter_mcp_toolkit_release_flutter: ^0.6.0
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  lints: ^6.1.0
+
+flutter:
+  uses-material-design: true

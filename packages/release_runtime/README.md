@@ -7,11 +7,11 @@ Service. This package is the other half of the story: a guarded MCP surface that
 lives inside a *release* build — loopback HTTP, bearer token, no VM Service, no
 service extensions, no Dart eval, no hot reload.
 
-> **Status: PR-01 … PR-05 of the fork plan.** Configuration, lifecycle, consent,
+> **Status: PR-01 … PR-06 of the fork plan — verified on a release APK.** Configuration, lifecycle, consent,
 > bearer authentication, the Streamable HTTP endpoint, and three read-only UI
 > tools are implemented and tested. The Flutter side (the actual semantics walk)
 > lives in [`flutter_mcp_toolkit_release_flutter`](../release_runtime_flutter).
-> Android device verification is PR-06.
+> See [android-deploy.md](../../docs/release_runtime/android-deploy.md) for what the device run proved.
 
 ## Why a separate package
 
@@ -92,7 +92,7 @@ Refusals are `success: false` payloads with stable codes
 ## Verifying it works
 
 ```bash
-dart test packages/release_runtime                    # 133 tests
+dart test packages/release_runtime                    # 135 tests
 flutter test packages/release_runtime_flutter         # 12 widget tests
 dart run packages/release_runtime/example/release_http_smoke.dart
 ```

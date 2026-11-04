@@ -21,6 +21,8 @@ final class ReleaseTransportStartRequest {
     required this.requestTimeout,
     required this.maxRequestBytes,
     required this.maxConcurrentRequests,
+    required this.maxSessions,
+    required this.sessionIdleTimeout,
     required this.accessToken,
     this.toolSurface,
   });
@@ -43,6 +45,13 @@ final class ReleaseTransportStartRequest {
   /// In-flight request ceiling.
   final int maxConcurrentRequests;
 
+  /// Maximum number of concurrent MCP sessions the server keeps.
+  final int maxSessions;
+
+  /// Idle time after which an unused session is freed, so a client that never
+  /// sends `DELETE` cannot exhaust [maxSessions].
+  final Duration sessionIdleTimeout;
+
   /// Bearer secret every request must present.
   ///
   /// A transport must reject anything else before dispatch, must compare in
@@ -64,6 +73,8 @@ final class ReleaseTransportStartRequest {
     'requestTimeoutMs': requestTimeout.inMilliseconds,
     'maxRequestBytes': maxRequestBytes,
     'maxConcurrentRequests': maxConcurrentRequests,
+    'maxSessions': maxSessions,
+    'sessionIdleTimeoutMs': sessionIdleTimeout.inMilliseconds,
     'accessToken': '<redacted>',
     'tools':
         toolSurface?.tools.map((tool) => tool.name).toList(growable: false) ??

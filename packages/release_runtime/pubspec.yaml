@@ -3,7 +3,7 @@ description: >-
   Opt-in MCP runtime for shipped Flutter apps. Exposes a guarded,
   permission-checked MCP surface inside an Android release build without the
   Dart VM Service, service extensions, or Dart eval.
-version: 0.5.0
+version: 0.6.0
 publish_to: 'none'
 license: MIT
 repository: >-

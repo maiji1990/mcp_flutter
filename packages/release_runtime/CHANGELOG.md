@@ -1,3 +1,20 @@
+## 0.6.0 — unreleased (fork)
+
+### Added
+
+- `ReleaseMcpConfig.maxSessions` (default 32, 1..256) and
+  `sessionIdleTimeout` (default 10 min, 30 s..24 h): the MCP server's session
+  budget is no longer tied to `maxConcurrentRequests`.
+- Devices docs and a release fixture (`showcase/flutter_release_demo`) with
+  `tool/mcp_smoke.dart` and `tool/mcp_probe.dart` for end-to-end verification.
+
+### Fixed
+
+- Found on a device: with `maxConcurrentRequests` (4) as the session cap, the
+  fifth client run was refused with "Too many sessions" and the endpoint stayed
+  useless until the app restarted. Sessions now have their own budget and idle
+  timeout; a regression test opens six sessions.
+
 ## 0.5.0 — unreleased (fork)
 
 ### Added

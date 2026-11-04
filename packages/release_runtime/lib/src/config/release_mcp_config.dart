@@ -60,6 +60,8 @@ final class ReleaseMcpConfig {
     this.maxRequestBytes = defaultMaxRequestBytes,
     this.requestTimeout = defaultRequestTimeout,
     this.maxConcurrentRequests = defaultMaxConcurrentRequests,
+    this.maxSessions = defaultMaxSessions,
+    this.sessionIdleTimeout = defaultSessionIdleTimeout,
   });
 
   /// IPv4 loopback literal.
@@ -86,6 +88,17 @@ final class ReleaseMcpConfig {
   /// Default number of in-flight requests the transport may accept.
   static const int defaultMaxConcurrentRequests = 4;
 
+  /// Default number of concurrent MCP sessions the server keeps.
+  ///
+  /// Sessions are cheap but not free: a client that never sends `DELETE` leaves
+  /// one behind until it idles out. A small budget (the SDK default is 100) is
+  /// not the point here — the point is that a handful of test runs must not
+  /// exhaust it.
+  static const int defaultMaxSessions = 32;
+
+  /// Default idle time after which an unused session is freed.
+  static const Duration defaultSessionIdleTimeout = Duration(minutes: 10);
+
   /// Lowest accepted port. `0` asks the OS for an ephemeral port.
   static const int minPort = 0;
 
@@ -103,6 +116,15 @@ final class ReleaseMcpConfig {
 
   /// Hard ceiling for in-flight requests.
   static const int maxConcurrentRequestsCeiling = 64;
+
+  /// Hard ceiling for sessions.
+  static const int maxSessionsCeiling = 256;
+
+  /// Shortest accepted session idle timeout.
+  static const Duration minSessionIdleTimeout = Duration(seconds: 30);
+
+  /// Longest accepted session idle timeout.
+  static const Duration maxSessionIdleTimeout = Duration(hours: 24);
 
   /// Interface to bind. Only loopback is allowed unless
   /// [allowNonLoopbackBinding] is explicitly set.
@@ -135,6 +157,12 @@ final class ReleaseMcpConfig {
 
   /// Maximum number of requests the transport serves concurrently.
   final int maxConcurrentRequests;
+
+  /// Maximum number of MCP sessions the server keeps at once.
+  final int maxSessions;
+
+  /// Idle time after which an unused session is freed.
+  final Duration sessionIdleTimeout;
 
   /// True when [host] is one of the three loopback spellings.
   bool get isLoopbackHost =>
@@ -211,6 +239,22 @@ final class ReleaseMcpConfig {
       );
     }
 
+    if (maxSessions < 1 || maxSessions > maxSessionsCeiling) {
+      problems.add(
+        const ReleaseConfigProblem('maxSessions', 'max_sessions_out_of_range'),
+      );
+    }
+
+    if (sessionIdleTimeout < minSessionIdleTimeout ||
+        sessionIdleTimeout > maxSessionIdleTimeout) {
+      problems.add(
+        const ReleaseConfigProblem(
+          'sessionIdleTimeout',
+          'session_idle_timeout_out_of_range',
+        ),
+      );
+    }
+
     return List<ReleaseConfigProblem>.unmodifiable(problems);
   }
 
@@ -224,6 +268,8 @@ final class ReleaseMcpConfig {
     int? maxRequestBytes,
     Duration? requestTimeout,
     int? maxConcurrentRequests,
+    int? maxSessions,
+    Duration? sessionIdleTimeout,
   }) => ReleaseMcpConfig(
     host: host ?? this.host,
     port: port ?? this.port,
@@ -235,6 +281,8 @@ final class ReleaseMcpConfig {
     maxRequestBytes: maxRequestBytes ?? this.maxRequestBytes,
     requestTimeout: requestTimeout ?? this.requestTimeout,
     maxConcurrentRequests: maxConcurrentRequests ?? this.maxConcurrentRequests,
+    maxSessions: maxSessions ?? this.maxSessions,
+    sessionIdleTimeout: sessionIdleTimeout ?? this.sessionIdleTimeout,
   );
 
   /// Redaction-safe JSON view. Contains no token, no secret, no user data.
@@ -248,6 +296,8 @@ final class ReleaseMcpConfig {
     'maxRequestBytes': maxRequestBytes,
     'requestTimeoutMs': requestTimeout.inMilliseconds,
     'maxConcurrentRequests': maxConcurrentRequests,
+    'maxSessions': maxSessions,
+    'sessionIdleTimeoutMs': sessionIdleTimeout.inMilliseconds,
   };
 
   @override
@@ -261,7 +311,9 @@ final class ReleaseMcpConfig {
       other.allowNonLoopbackBinding == allowNonLoopbackBinding &&
       other.maxRequestBytes == maxRequestBytes &&
       other.requestTimeout == requestTimeout &&
-      other.maxConcurrentRequests == maxConcurrentRequests;
+      other.maxConcurrentRequests == maxConcurrentRequests &&
+      other.maxSessions == maxSessions &&
+      other.sessionIdleTimeout == sessionIdleTimeout;
 
   @override
   int get hashCode => Object.hash(
@@ -274,6 +326,8 @@ final class ReleaseMcpConfig {
     maxRequestBytes,
     requestTimeout,
     maxConcurrentRequests,
+    maxSessions,
+    sessionIdleTimeout,
   );
 
   @override

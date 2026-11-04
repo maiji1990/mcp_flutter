@@ -164,6 +164,8 @@ final class ReleaseMcpRuntime {
           requestTimeout: config.requestTimeout,
           maxRequestBytes: config.maxRequestBytes,
           maxConcurrentRequests: config.maxConcurrentRequests,
+          maxSessions: config.maxSessions,
+          sessionIdleTimeout: config.sessionIdleTimeout,
           accessToken: _accessToken.value,
           toolSurface: _tools == null
               ? null

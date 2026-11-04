@@ -255,7 +255,9 @@ masks the value of every `sensitive` node (and every value when
 | `allowNonLoopbackBinding` | `false` | Explicit opt-in for LAN/public binds (not supported in V1). |
 | `maxRequestBytes` | `1 MiB` | `1 KiB .. 8 MiB`; becomes the transport's body ceiling. |
 | `requestTimeout` | `30 s` | `> 0` and `<= 5 min`; enforced by the transport. |
-| `maxConcurrentRequests` | `4` | `1..64`; becomes the SDK's max concurrent sessions. |
+| `maxConcurrentRequests` | `4` | `1..64`; the transport's request budget. |
+| `maxSessions` | `32` | `1..256`; concurrent MCP sessions the server keeps. Decoupled from `maxConcurrentRequests` after device testing showed four clients locking out the fifth. |
+| `sessionIdleTimeout` | `10 min` | `30 s .. 24 h`; an unused session is freed, so a client that never sends `DELETE` cannot exhaust `maxSessions`. |
 
 ## Lifecycle
 

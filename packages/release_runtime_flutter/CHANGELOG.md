@@ -1,3 +1,10 @@
+## 0.6.0 — unreleased (fork)
+
+### Changed
+
+- No API change. Consumes `flutter_mcp_toolkit_release` 0.6.0 (session budget
+  fix); verified end to end on a release APK.
+
 ## 0.5.0 — unreleased (fork)
 
 ### Added

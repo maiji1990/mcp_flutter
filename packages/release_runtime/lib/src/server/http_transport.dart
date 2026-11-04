@@ -66,7 +66,7 @@ final class HttpReleaseRuntimeTransport implements ReleaseRuntimeTransport {
         name: serverName,
         version: serverVersion,
         capabilities: mcp.ServerCapabilities.simple(tools: true),
-        maxConnections: request.maxConcurrentRequests,
+        maxConnections: request.maxSessions,
       ),
     );
 
@@ -106,6 +106,7 @@ final class HttpReleaseRuntimeTransport implements ReleaseRuntimeTransport {
         requestTimeout: request.requestTimeout,
         isJsonResponseEnabled: true,
         enableGetStream: false,
+        sessionIdleTimeout: request.sessionIdleTimeout,
         corsConfig: mcp.CorsConfig(
           allowOrigin: 'http://${_hostForUri(request.host)}',
         ),
