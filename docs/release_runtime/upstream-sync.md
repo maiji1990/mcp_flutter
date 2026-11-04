@@ -15,7 +15,8 @@ under someone else's review cadence while it is still moving.
 This applies to every agent and human working in this repository:
 
 - push only to `origin` (the fork);
-- pull from `upstream` read-only, to keep `main` a mirror;
+- pull from `upstream` read-only; `origin/main` is the product mainline and
+  carries the fork's work, so upstream arrives by merge (see below);
 - if a piece is genuinely upstream-shaped (for example a generic semantics or
   gesture interface), stop and ask the repository owner first. Do not open the
   PR yourself, and do not "prepare" one by pushing a branch to upstream.
@@ -25,22 +26,23 @@ There is no exception for docs, CI, or "tiny" fixes.
 ## Branch model
 
 ```
-origin/main                 mirror of upstream/main — never carries fork work
-upstream/main               Arenukvern/mcp_flutter
-feat/android-release-mcp    the patch (PR-01..PR-06)
-release/main                optional product branch; takes feature PRs
+origin/main                 product mainline — carries the fork's work
+upstream/main               Arenukvern/mcp_flutter (read-only source)
+feat/android-release-mcp    the patch branch, merged into main at PR-06
 ```
 
-## First-time setup
+`main` is **no longer a fast-forward mirror** of upstream: PR-01…PR-06 landed on
+it as a `--no-ff` merge, so upstream can only arrive by an explicit merge (see
+below). That is a deliberate trade — one mainline, one deployable branch — but
+it means a `--ff-only` sync now fails on purpose.
+
+If a clean mirror is ever wanted again, the shape to use is:
 
 ```bash
-git remote add upstream https://github.com/Arenukvern/mcp_flutter.git
-git fetch upstream --tags
+git branch release/main main            # keep the product branch
 git switch main
-git merge --ff-only upstream/main
-git push origin main
-
-git switch -c feat/android-release-mcp
+git reset --hard upstream/main          # main back to a pure mirror
+git push --force-with-lease origin main
 ```
 
 ## Syncing upstream
@@ -48,18 +50,24 @@ git switch -c feat/android-release-mcp
 ```bash
 git fetch upstream --tags
 git switch main
-git merge --ff-only upstream/main
+git merge upstream/main                 # not --ff-only: main has fork commits
+# resolve conflicts where upstream touched the same files (it should not, in
+# practice: the fork adds packages/ and docs/ paths upstream does not have)
+dart test packages/release_runtime
+flutter test packages/release_runtime_flutter
 git push origin main
+```
 
+Then bring `feat/android-release-mcp` up to date:
+
+```bash
 git switch feat/android-release-mcp
-git rebase upstream/main
-# resolve, run tests, then:
+git rebase main
 git push --force-with-lease origin feat/android-release-mcp
 ```
 
 `--force-with-lease` is only acceptable while the feature branch is single-owner.
-A shared `release/main` takes merges from `feat/android-release-mcp` instead of
-being rebased.
+Once others branch from it, merge `main` into it instead of rebasing.
 
 ## Baseline
 
