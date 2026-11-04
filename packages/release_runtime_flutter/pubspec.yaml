@@ -1,0 +1,31 @@
+name: flutter_mcp_toolkit_release_flutter
+description: >-
+  Flutter adapter for flutter_mcp_toolkit_release — semantic UI snapshots from
+  a running app, with obscured/password nodes flagged for redaction.
+version: 0.6.0
+publish_to: 'none'
+license: MIT
+repository: >-
+  https://github.com/Arenukvern/mcp_flutter/tree/main/packages/release_runtime_flutter
+issue_tracker: https://github.com/Arenukvern/mcp_flutter/issues
+topics:
+  - mcp
+  - flutter
+  - release
+  - android
+  - agentic-harness
+environment:
+  sdk: '>=3.13.0 <4.0.0'
+  flutter: '>=3.44.0'
+resolution: workspace
+dependencies:
+  flutter:
+    sdk: flutter
+  # The toolkit's SemanticSnapshotService is the single implementation of the
+  # UI-tree walk; this adapter reuses it rather than shipping a second one.
+  mcp_toolkit: ^7.0.1
+  flutter_mcp_toolkit_release: ^0.6.0
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  lints: ^6.1.0
