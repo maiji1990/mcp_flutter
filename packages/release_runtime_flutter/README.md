@@ -17,6 +17,26 @@ final runtime = ReleaseMcpRuntime.http(
 await runtime.start(); // only when the user enables local AI access
 ```
 
+## Acting on the UI
+
+```dart
+final store = ReleaseSnapshotStore();
+final tools = ReleaseToolbox(<ReleaseToolSurface>[
+  ReleaseReadTools(source: FlutterReleaseUiSnapshotSource(), store: store),
+  ReleaseInteractionTools(
+    store: store,
+    driver: const FlutterReleaseUiInteractionDriver(),
+  ),
+]);
+```
+
+`FlutterReleaseUiInteractionDriver` reuses the toolkit's gesture service, so
+tap/text/scroll behave the same way they do for the debug tools: a semantic
+action when one exists, synthesised pointer events otherwise, and a structured
+refusal when the node left the tree. What the driver does not decide is whether
+a call may happen at all — permission, snapshot currency, and consumption live
+in the core runtime.
+
 ## What it adds
 
 | Concern | Where |

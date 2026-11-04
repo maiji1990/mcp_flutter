@@ -150,3 +150,21 @@ final class McpHttpResponse {
   final Map<String, dynamic>? payload;
   final String rawBody;
 }
+
+/// Decodes the JSON envelope a release tool returns in its text content.
+Map<String, dynamic> releasePayloadOf(Map<String, dynamic> result) {
+  final content = result['content'];
+  if (content is! List || content.isEmpty) {
+    return <String, dynamic>{};
+  }
+  final first = content.first;
+  if (first is! Map) {
+    return <String, dynamic>{};
+  }
+  final text = first['text'];
+  if (text is! String) {
+    return <String, dynamic>{};
+  }
+  final decoded = jsonDecode(text);
+  return decoded is Map<String, dynamic> ? decoded : <String, dynamic>{};
+}

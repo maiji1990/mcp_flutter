@@ -1,3 +1,16 @@
+## 0.4.0 — unreleased (fork)
+
+### Added
+
+- `FlutterReleaseUiInteractionDriver`: reuse of `mcp_toolkit`'s
+  `GestureInteractionService` (`tapAtRef`, `enterTextAtRef`, `scroll`), with
+  liveness/visibility/enabled inspection and driver-error translation.
+- Widget tests: a click through `ui_click` increments app state, `ui_set_text`
+  writes into a field and reads back, an obscured field is refused, and
+  `ui_scroll` moves a list through its scroll action.
+
+## 0.3.0 — unreleased (fork)
+
 ## 0.3.0 — unreleased (fork)
 
 ### Added

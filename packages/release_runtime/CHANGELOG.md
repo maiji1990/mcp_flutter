@@ -1,3 +1,31 @@
+## 0.4.0 — unreleased (fork)
+
+### Added
+
+- Write tools `ui_click`, `ui_set_text`, `ui_scroll`, all requiring
+  `ui:interact` **and** the `snapshotId` that issued the ref.
+- `ReleaseSnapshotStore`: publishes snapshots, tracks the current unused one,
+  and consumes it after an action so a second call cannot re-tap a stale ref.
+- `ReleaseUiInteractionDriver` contract (`isSnapshotCurrent`, `inspect`,
+  `tap`, `setText`, `scroll`) plus `ReleaseUiNodeState` and
+  `ReleaseDriverResult`.
+- `ReleaseToolbox`: composes read and write surfaces into one, refusing
+  duplicate tool names.
+- `ReleaseReadTools` publishes what it returns, so only refs the client saw can
+  be acted on.
+- Serialized interaction queue with in-queue re-validation; concurrent calls on
+  one snapshot yield exactly one action and one `stale_snapshot`.
+- Driver failure mapping to stable codes (`node_not_actionable`,
+  `stale_snapshot`, `unsupported_action`, `interaction_failed`) without
+  forwarding driver prose.
+- New codes: `snapshot_required`, `stale_snapshot`, `unknown_ref`,
+  `node_not_actionable`, `unsupported_action`, `node_sensitive`,
+  `interaction_failed`; new `execution` category.
+- Tests: 30 interaction cases plus the HTTP round trip (permission gate, click,
+  consumption, sensitive refusal, schema rejection).
+
+## 0.3.0 — unreleased (fork)
+
 ## 0.3.0 — unreleased (fork)
 
 ### Added

@@ -24,6 +24,9 @@ tests. The gaps that must close before an Android release build is called
 | Read-only session | Only `ui:read` is granted implicitly; interaction, capture, and app actions need consent. |
 | No silent downgrade | `readOnlyByDefault: false` + missing authorization → `authorization_missing`. |
 | Consent withdrawal | `revokePermissions()`; `ui:read` is structural, so end the session with `stop()`. |
+| Snapshot-scoped refs | Every interaction requires the `snapshotId` that issued its ref, must match the store's current unused snapshot and the app's current snapshot, and the snapshot is consumed on success (tested: one tap, then `stale_snapshot`). |
+| Serialized interactions | One write at a time, re-validated inside the queue, so a tree that changed while a call waited cannot be acted on. |
+| Sensitive input is never driven | `ui_set_text` refuses nodes flagged `sensitive` (obscured semantics) with `node_sensitive`, before any driver call. |
 | No secret leakage in errors | Messages are fixed per code; details carry field names, counts, refs, and error *types* only. A throwing handler becomes `unknown_error` without a stack trace or message text (tested). |
 | No debug capabilities | No eval, no hot reload, no arbitrary file IO, no shell — absent by construction. |
 
@@ -51,9 +54,6 @@ on sensitive routes or mask before encoding.
 - **Audit log.** No call log exists yet. When interaction tools land, log tool
   name, session id, permission decision, and argument *shapes* (never values),
   with the token redacted.
-- **Snapshot-scoped refs for interactions.** PR-03 tools are read-only; PR-04
-  must require `snapshotId` on every mutating call and re-validate the node
-  after queueing it.
 - **Device test matrix.** No Android device run yet: foreground/background
   transitions, rotation, dialogs, back navigation, process death, and the
   minimum supported API level are all unverified.

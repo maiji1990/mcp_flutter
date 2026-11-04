@@ -4,4 +4,5 @@
 //
 // Fork addition (Android release runtime).
 
+export 'src/flutter_interaction_driver.dart';
 export 'src/flutter_ui_snapshot_source.dart';

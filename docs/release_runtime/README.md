@@ -22,6 +22,35 @@ hot reload. None of that exists in a release build, and none of it should.
 | 05 | App action registry + optional capture | not started |
 | 06 | Android E2E, docs, compatibility matrix | not started |
 
+## Guarded interactions
+
+A write tool (`ui_click`, `ui_set_text`, `ui_scroll`) needs three things at
+once: `ui:interact`, the `ref`, **and** the `snapshotId` that issued it.
+
+Why the id is mandatory: refs are positional strings re-issued by every
+snapshot. Without the id, "click `s_3`" from thirty seconds ago clicks whatever
+holds that position now. The runtime therefore checks, in order:
+
+1. the snapshot is one this session published — otherwise `stale_snapshot`
+   (`unknown_snapshot`);
+2. it is still the newest, unused one — otherwise `stale_snapshot`
+   (`superseded` / `consumed`);
+3. the app still reports it as current — otherwise `stale_snapshot`
+   (`app_moved_on`);
+4. the ref exists in it — otherwise `unknown_ref`;
+5. the node is attached, on screen, and enabled — otherwise
+   `node_not_actionable` with the reason;
+6. the node exposes the action — otherwise `unsupported_action`;
+7. `ui_set_text` refuses sensitive (obscured) fields — `node_sensitive`.
+
+Validation runs again **inside** the interaction queue, because the tree can
+change while a call waits its turn. Calls are serialized: two clicks on one
+snapshot produce exactly one tap and one `stale_snapshot`.
+
+A successful call means *dispatched*, not *finished*. It consumes the snapshot,
+so the next interaction needs a fresh `ui_get_tree` — which is also how a client
+learns what its action did.
+
 What "landed" means: `dart analyze` / `flutter analyze` clean, `dart test`
 (79) and `flutter test` (5) green on Flutter 3.47.9 / Dart 3.13.7, plus a real
 handshake and tool call over a real socket. It does **not** mean validated on an

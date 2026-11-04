@@ -50,6 +50,7 @@ abstract final class ReleaseMcpErrorCategory {
   static const String permission = 'permission';
   static const String state = 'state';
   static const String transport = 'transport';
+  static const String execution = 'execution';
   static const String internal = 'internal';
 }
 
@@ -99,6 +100,27 @@ abstract final class ReleaseMcpErrorCode {
 
   /// A tool argument was missing, of the wrong type, or out of range.
   static const String invalidArgument = 'invalid_argument';
+
+  /// An interaction arrived without the `snapshotId` its ref belongs to.
+  static const String snapshotRequired = 'snapshot_required';
+
+  /// The snapshot is unknown, superseded, already used, or the app moved on.
+  static const String staleSnapshot = 'stale_snapshot';
+
+  /// The ref does not exist in the named snapshot.
+  static const String unknownRef = 'unknown_ref';
+
+  /// The node is detached, off screen, disabled, or otherwise unverifiable.
+  static const String nodeNotActionable = 'node_not_actionable';
+
+  /// The node does not expose the action the tool needs.
+  static const String unsupportedAction = 'unsupported_action';
+
+  /// The node holds sensitive text (password-like) and refuses input.
+  static const String nodeSensitive = 'node_sensitive';
+
+  /// The UI refused or failed the action after it was dispatched.
+  static const String interactionFailed = 'interaction_failed';
 
   /// Catch-all for unexpected failures.
   static const String unknown = 'unknown_error';
@@ -205,6 +227,55 @@ const Map<String, ReleaseErrorDescriptor> _descriptors =
         retryable: false,
         httpLikeStatus: 400,
         message: 'A tool argument was invalid.',
+      ),
+      ReleaseMcpErrorCode.snapshotRequired: ReleaseErrorDescriptor(
+        code: ReleaseMcpErrorCode.snapshotRequired,
+        category: ReleaseMcpErrorCategory.validation,
+        retryable: true,
+        httpLikeStatus: 400,
+        message: 'An interaction needs the snapshot that issued the ref.',
+      ),
+      ReleaseMcpErrorCode.staleSnapshot: ReleaseErrorDescriptor(
+        code: ReleaseMcpErrorCode.staleSnapshot,
+        category: ReleaseMcpErrorCategory.state,
+        retryable: true,
+        httpLikeStatus: 409,
+        message: 'That snapshot is no longer current.',
+      ),
+      ReleaseMcpErrorCode.unknownRef: ReleaseErrorDescriptor(
+        code: ReleaseMcpErrorCode.unknownRef,
+        category: ReleaseMcpErrorCategory.validation,
+        retryable: true,
+        httpLikeStatus: 404,
+        message: 'No node with that ref in this snapshot.',
+      ),
+      ReleaseMcpErrorCode.nodeNotActionable: ReleaseErrorDescriptor(
+        code: ReleaseMcpErrorCode.nodeNotActionable,
+        category: ReleaseMcpErrorCategory.state,
+        retryable: true,
+        httpLikeStatus: 409,
+        message: 'The node is not actionable right now.',
+      ),
+      ReleaseMcpErrorCode.unsupportedAction: ReleaseErrorDescriptor(
+        code: ReleaseMcpErrorCode.unsupportedAction,
+        category: ReleaseMcpErrorCategory.validation,
+        retryable: false,
+        httpLikeStatus: 422,
+        message: 'The node does not expose that action.',
+      ),
+      ReleaseMcpErrorCode.nodeSensitive: ReleaseErrorDescriptor(
+        code: ReleaseMcpErrorCode.nodeSensitive,
+        category: ReleaseMcpErrorCategory.permission,
+        retryable: false,
+        httpLikeStatus: 403,
+        message: 'Sensitive input is never driven from outside the app.',
+      ),
+      ReleaseMcpErrorCode.interactionFailed: ReleaseErrorDescriptor(
+        code: ReleaseMcpErrorCode.interactionFailed,
+        category: ReleaseMcpErrorCategory.execution,
+        retryable: true,
+        httpLikeStatus: 500,
+        message: 'The UI refused or failed the action.',
       ),
       ReleaseMcpErrorCode.unknown: ReleaseErrorDescriptor(
         code: ReleaseMcpErrorCode.unknown,

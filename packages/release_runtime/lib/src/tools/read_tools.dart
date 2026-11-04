@@ -9,6 +9,7 @@ import '../privacy/privacy_filter.dart';
 import '../security/permissions.dart';
 import '../ui/release_ui_types.dart';
 import 'release_tools.dart';
+import 'snapshot_store.dart';
 
 /// The read-only UI tools of release MCP v1: `ui_get_tree`,
 /// `ui_get_current_page`, and `ui_find_element`.
@@ -23,12 +24,19 @@ final class ReleaseReadTools implements ReleaseToolSurface {
   ReleaseReadTools({
     required this.source,
     this.privacy = const RedactingPrivacyFilter(),
+    this.store,
     this.maxNodesCeiling = 500,
     this.maxDepthCeiling = 64,
   });
 
   /// Where snapshots come from (the Flutter adapter in a release app).
   final ReleaseUiSnapshotSource source;
+
+  /// Publish targets, so refs from a read can be used by an interaction.
+  ///
+  /// When null the tools stay usable read-only; nothing can be clicked, which
+  /// is the right default for a runtime that has no interaction driver.
+  final ReleaseSnapshotStore? store;
 
   /// The filter applied before a snapshot leaves the runtime.
   final ReleasePrivacyFilter privacy;
@@ -160,6 +168,10 @@ final class ReleaseReadTools implements ReleaseToolSurface {
         ? walkOrder.sublist(0, maxNodesResult.value!)
         : walkOrder;
 
+    // Publish exactly what the caller can see: a ref the response never
+    // contained must not become clickable through a lucky guess.
+    store?.publish(snapshot.copyWith(nodes: capped));
+
     return ReleaseToolCallResult(
       requestId: requestId,
       success: true,
@@ -209,6 +221,7 @@ final class ReleaseReadTools implements ReleaseToolSurface {
     }
 
     final snapshot = privacy.apply(await source.captureSnapshot());
+    store?.publish(snapshot);
     final matches = snapshot.nodes
         .where(
           (node) =>

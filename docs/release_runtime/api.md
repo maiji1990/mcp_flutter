@@ -69,6 +69,68 @@ Refusal codes: `invalid_argument`, `element_not_found`, `ambiguous_match`
 (details list candidate refs), `tool_not_found`, `permission_denied`,
 `runtime_not_running`, `unknown_error`.
 
+## Write tools (v1)
+
+| Tool | Arguments | Permission | Notes |
+|---|---|---|---|
+| `ui_click` | `ref`, `snapshotId` | `ui:interact` | Taps the node; needs the `tap` action. |
+| `ui_set_text` | `ref`, `text`, `snapshotId` | `ui:interact` | Types into a `textField`; refuses `sensitive` nodes. |
+| `ui_scroll` | `ref`, `direction` (up/down/left/right), `amount` (1..5000, default 300), `snapshotId` | `ui:interact` | Scrolls the node or its scrollable ancestor. |
+
+`snapshotId` is **required** on all three: refs are positional strings that
+every snapshot re-issues, so acting without the id means acting on whatever took
+the node's place. A success answers `{"dispatched": true, "ref", "action"}` —
+dispatched, not finished; the next `ui_get_tree` is how a client learns the
+outcome.
+
+Refusals specific to interactions:
+
+| Code | When |
+|---|---|
+| `snapshot_required` | `snapshotId` missing |
+| `stale_snapshot` | unknown / superseded / already consumed / the app moved on |
+| `unknown_ref` | the ref is not in that snapshot |
+| `node_not_actionable` | detached, off screen, disabled, unverifiable |
+| `unsupported_action` | the node does not expose the action |
+| `node_sensitive` | `ui_set_text` against an obscured field |
+| `interaction_failed` | the UI refused or threw while performing |
+
+### Serialization and consumption
+
+Calls are queued: one interaction at a time, and the queue re-validates before
+acting, because the tree can change while a call waits. A successful action
+consumes the snapshot — a second call with the same id is `stale_snapshot`
+(`consumed`) rather than a second tap.
+
+`ui_find_element` publishes its own snapshot, so it supersedes a refs set from
+an earlier `ui_get_tree`; `ui_get_current_page` deliberately does not.
+
+## `ReleaseSnapshotStore`
+
+```dart
+final store = ReleaseSnapshotStore(capacity: 4);
+store.publish(snapshot);      // ui_get_tree / ui_find_element do this
+store.isUsable(snapshotId);   // latest and unused
+store.nodeById(snapshotId, ref);
+store.consumeLatest();        // after a successful interaction
+```
+
+## `ReleaseUiInteractionDriver`
+
+```dart
+abstract interface class ReleaseUiInteractionDriver {
+  Future<bool> isSnapshotCurrent(String snapshotId);
+  Future<ReleaseUiNodeState> inspect(String ref);
+  Future<ReleaseDriverResult> tap(String ref);
+  Future<ReleaseDriverResult> setText(String ref, String text);
+  Future<ReleaseDriverResult> scroll(String ref, ReleaseScrollDirection direction, {double amount});
+}
+```
+
+`ReleaseUiNodeState`: `attached`, `detached`, `hidden`, `disabled`,
+`unknown`. `ReleaseDriverResult` carries `ok`, a short non-sensitive `error`
+token, and non-sensitive `details` (for example `via: semantic_action`).
+
 ## UI value types
 
 `ReleaseUiNode` — `ref`, `id`, `type`, `identifier`, `label`, `value`,
