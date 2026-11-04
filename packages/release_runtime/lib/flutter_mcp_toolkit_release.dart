@@ -6,6 +6,10 @@
 // endpoint backed by the published `mcp_server` package; it carries no VM
 // Service, no service extensions, and no Dart eval.
 
+export 'src/actions/app_action.dart';
+export 'src/actions/app_action_tools.dart';
+export 'src/capture/capture_policy.dart';
+export 'src/capture/capture_source.dart';
 export 'src/config/release_mcp_config.dart';
 export 'src/errors/release_mcp_error.dart';
 export 'src/lifecycle/runtime_lifecycle.dart';
@@ -16,6 +20,7 @@ export 'src/runtime_version.dart';
 export 'src/security/access_token.dart';
 export 'src/security/permissions.dart';
 export 'src/server/http_transport.dart';
+export 'src/tools/capture_tools.dart';
 export 'src/tools/interaction_tools.dart';
 export 'src/tools/read_tools.dart';
 export 'src/tools/release_tools.dart';

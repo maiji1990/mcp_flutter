@@ -105,6 +105,77 @@ consumes the snapshot — a second call with the same id is `stale_snapshot`
 `ui_find_element` publishes its own snapshot, so it supersedes a refs set from
 an earlier `ui_get_tree`; `ui_get_current_page` deliberately does not.
 
+## App actions
+
+The app declares its own business actions; the client cannot invent one.
+
+```dart
+final action = ReleaseAppAction(
+  name: 'pay.invoice',            // slug; also the app:pay.invoice permission
+  description: 'Pay an invoice',
+  inputSchema: <String, Object?>{'type': 'object', 'properties': <String, Object?>{'invoiceId': <String, Object?>{'type': 'string'}}},
+  handler: (arguments) async => <String, Object?>{'status': 'paid'},
+);
+
+final tools = ReleaseAppActionTools(<ReleaseAppAction>[action]);
+```
+
+| Member | Contract |
+|---|---|
+| `name` | `^[a-z][a-z0-9._-]{0,63}$`, validated at construction. |
+| `permission` | `app:<name>`, requiring explicit consent. |
+| `handler` | Receives the `arguments` object; its return becomes `data.result`. |
+
+One tool fronts them: `app_invoke_action` with `{name, arguments}`. The tool's
+schema lists the registered names as an `enum`, and its required permission is
+resolved per call:
+
+```dart
+ReleaseToolDefinition(
+  name: 'app_invoke_action',
+  permission: null,                      // dynamic
+  permissionResolver: (args) => actions[args['name']]?.permission,
+  ...
+)
+```
+
+Refusals: `action_not_found` (unregistered — the resolver yields no permission,
+so the surface answers), `invalid_argument` (missing name, non-object
+arguments), `action_failed` (the handler threw; details carry the exception
+type only). Calls are serialized.
+
+## Capture
+
+```dart
+final tools = ReleaseCaptureTools(
+  source: FlutterReleaseUiCaptureSource(routeProvider: myRouteProvider),
+  policy: const ReleaseCapturePolicy(blockedRoutes: <String>{'/wallet'}),
+  maxBytes: 1536 * 1024,
+);
+```
+
+`ui_capture` takes `scale` (0.1..3, default 1) and `format` (`png`; `jpeg`
+answers `unsupported_format`). Order of checks: permission `ui:capture` →
+argument validation → route policy → capture → byte budget.
+
+| Refusal | When |
+|---|---|
+| `route_blocked` | `ReleaseCapturePolicy` rejects the current route (checked **before** the frame) |
+| `capture_unavailable` | nothing painted, protected content, or the source threw |
+| `capture_too_large` | encoded image over `maxBytes` (details: size, limit, dimensions) |
+
+Success returns `mimeType`, `width`, `height`, `byteLength`, `scale`, and
+`bytesBase64`.
+
+```dart
+abstract interface class ReleaseUiCaptureSource {
+  Future<String?> currentRouteName();
+  Future<ReleaseCaptureResult?> capture(ReleaseCaptureRequest request);
+}
+```
+
+Returning null means "cannot capture", never "here is a blank image".
+
 ## `ReleaseSnapshotStore`
 
 ```dart
@@ -217,6 +288,12 @@ fixed per code, so a failure can never echo request data or a token.
 | `transport_stop_failed` | transport | 503 |
 | `runtime_not_running` | state | 409 |
 | `runtime_disposed` | state | 409 |
+| `action_not_found` | validation | 404 |
+| `action_failed` | execution | 500 |
+| `capture_unavailable` | capability | 501 |
+| `capture_too_large` | validation | 413 |
+| `route_blocked` | permission | 403 |
+| `unsupported_format` | validation | 415 |
 | `unknown_error` | internal | 500 |
 
 HTTP-level refusals come from the transport: 401 (bearer), 403 (foreign

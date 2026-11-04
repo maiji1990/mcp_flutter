@@ -1,3 +1,14 @@
+## 0.5.0 — unreleased (fork)
+
+### Added
+
+- `FlutterReleaseUiCaptureSource`: reuses `ScreenshotService` for the frame and
+  adds measurement plus resampling to the requested scale; reports the route so
+  the runtime's policy decides.
+- Widget tests: PNG capture through the tool, base64 round trip, and a blocked
+  route refused before any frame is taken (capture runs in `runAsync`, because
+  rasterising is real engine work rather than fake-async work).
+
 ## 0.4.0 — unreleased (fork)
 
 ### Added

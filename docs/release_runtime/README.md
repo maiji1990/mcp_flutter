@@ -19,8 +19,28 @@ hot reload. None of that exists in a release build, and none of it should.
 | 02 | Streamable HTTP transport, bearer auth, Origin, bounds | **landed** |
 | 03 | Semantic snapshot, refs, redaction, read tools | **landed** (widget tests; no device yet) |
 | 04 | Guarded interactions (mandatory `snapshotId`) | not started |
-| 05 | App action registry + optional capture | not started |
+| 05 | App action registry + optional capture | **landed** |
 | 06 | Android E2E, docs, compatibility matrix | not started |
+
+## Business actions and capture
+
+**Business actions** are declared by the app, not discovered by the client. Each
+`ReleaseAppAction` carries a name (`pay.invoice`), a description, an argument
+schema, and a handler; its permission is `app:<name>`, so consent is granted per
+action rather than "the agent may do business things". One MCP tool,
+`app_invoke_action`, fronts them all: the permission a call needs depends on the
+`name` argument, which is why a tool definition can carry a resolver. An
+unregistered name resolves to "no static permission" and is refused as
+`action_not_found` — not as a misleading `permission_denied`. Actions are
+serialized with each other.
+
+**Capture** is the one tool whose output cannot be redacted after the fact. So
+it is guarded three ways: `ui:capture` consent (never implied by `ui:read` or
+`ui:interact`), a route policy evaluated *before* the frame is taken
+(`ReleaseCapturePolicy`), and a byte budget (an encoded PNG of a phone screen is
+megabytes; an oversized frame is refused, not truncated). Only PNG is produced
+in v1 — the reused toolkit path encodes PNG; JPEG is refused as
+`unsupported_format` rather than quietly returning PNG.
 
 ## Guarded interactions
 

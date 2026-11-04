@@ -27,6 +27,10 @@ tests. The gaps that must close before an Android release build is called
 | Snapshot-scoped refs | Every interaction requires the `snapshotId` that issued its ref, must match the store's current unused snapshot and the app's current snapshot, and the snapshot is consumed on success (tested: one tap, then `stale_snapshot`). |
 | Serialized interactions | One write at a time, re-validated inside the queue, so a tree that changed while a call waited cannot be acted on. |
 | Sensitive input is never driven | `ui_set_text` refuses nodes flagged `sensitive` (obscured semantics) with `node_sensitive`, before any driver call. |
+| Per-action consent | Every business action needs its own `app:<name>` grant; one consent is not a blanket permission. Unregistered names are refused by the surface. |
+| Capture needs its own consent | `ui:capture` is never implied by `ui:read`/`ui:interact`; without it the call is `permission_denied`. |
+| Capture route policy | Blocked routes are refused **before** the frame is painted, because pixels cannot be redacted afterwards. |
+| Capture size budget | Oversized frames are refused (`capture_too_large`) rather than truncated, so a client never receives a silent crop. |
 | No secret leakage in errors | Messages are fixed per code; details carry field names, counts, refs, and error *types* only. A throwing handler becomes `unknown_error` without a stack trace or message text (tested). |
 | No debug capabilities | No eval, no hot reload, no arbitrary file IO, no shell — absent by construction. |
 

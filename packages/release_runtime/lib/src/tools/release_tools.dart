@@ -19,7 +19,8 @@ final class ReleaseToolDefinition {
     required this.name,
     required this.description,
     required this.inputSchema,
-    required this.permission,
+    this.permission,
+    this.permissionResolver,
   });
 
   /// Wire name, for example `ui_get_tree`.
@@ -32,7 +33,24 @@ final class ReleaseToolDefinition {
   final Map<String, Object?> inputSchema;
 
   /// Permission a session must hold to call this tool.
-  final ReleasePermissionId permission;
+  ///
+  /// Null means the requirement is dynamic (see [permissionResolver]) or that
+  /// the surface itself decides, as `app_invoke_action` does.
+  final ReleasePermissionId? permission;
+
+  /// Computes the permission from the call's arguments.
+  ///
+  /// Used where one tool fronts many operations — each business action has its
+  /// own `app:<name>` permission. Returning null means "no static requirement":
+  /// the runtime delegates and the surface answers, which is how an unregistered
+  /// action becomes `action_not_found` instead of a misleading
+  /// `permission_denied`.
+  final ReleasePermissionId? Function(Map<String, Object?> arguments)?
+  permissionResolver;
+
+  /// Permission this call needs, if any.
+  ReleasePermissionId? permissionFor(Map<String, Object?> arguments) =>
+      permissionResolver?.call(arguments) ?? permission;
 }
 
 /// Non-sensitive failure payload of a tool call.

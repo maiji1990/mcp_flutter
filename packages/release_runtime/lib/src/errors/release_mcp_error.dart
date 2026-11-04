@@ -51,6 +51,7 @@ abstract final class ReleaseMcpErrorCategory {
   static const String state = 'state';
   static const String transport = 'transport';
   static const String execution = 'execution';
+  static const String capability = 'capability';
   static const String internal = 'internal';
 }
 
@@ -121,6 +122,24 @@ abstract final class ReleaseMcpErrorCode {
 
   /// The UI refused or failed the action after it was dispatched.
   static const String interactionFailed = 'interaction_failed';
+
+  /// The app did not register an action with that name.
+  static const String actionNotFound = 'action_not_found';
+
+  /// A registered business action threw or refused.
+  static const String actionFailed = 'action_failed';
+
+  /// The screen could not be captured (no painted layer, protected content).
+  static const String captureUnavailable = 'capture_unavailable';
+
+  /// The encoded image exceeds the runtime's byte budget.
+  static const String captureTooLarge = 'capture_too_large';
+
+  /// The app's capture policy blocks the current route.
+  static const String routeBlocked = 'route_blocked';
+
+  /// The requested image format is not available.
+  static const String unsupportedFormat = 'unsupported_format';
 
   /// Catch-all for unexpected failures.
   static const String unknown = 'unknown_error';
@@ -276,6 +295,48 @@ const Map<String, ReleaseErrorDescriptor> _descriptors =
         retryable: true,
         httpLikeStatus: 500,
         message: 'The UI refused or failed the action.',
+      ),
+      ReleaseMcpErrorCode.actionNotFound: ReleaseErrorDescriptor(
+        code: ReleaseMcpErrorCode.actionNotFound,
+        category: ReleaseMcpErrorCategory.validation,
+        retryable: false,
+        httpLikeStatus: 404,
+        message: 'That action was not registered by the app.',
+      ),
+      ReleaseMcpErrorCode.actionFailed: ReleaseErrorDescriptor(
+        code: ReleaseMcpErrorCode.actionFailed,
+        category: ReleaseMcpErrorCategory.execution,
+        retryable: true,
+        httpLikeStatus: 500,
+        message: 'The business action refused or failed.',
+      ),
+      ReleaseMcpErrorCode.captureUnavailable: ReleaseErrorDescriptor(
+        code: ReleaseMcpErrorCode.captureUnavailable,
+        category: ReleaseMcpErrorCategory.capability,
+        retryable: true,
+        httpLikeStatus: 501,
+        message: 'The screen could not be captured.',
+      ),
+      ReleaseMcpErrorCode.captureTooLarge: ReleaseErrorDescriptor(
+        code: ReleaseMcpErrorCode.captureTooLarge,
+        category: ReleaseMcpErrorCategory.validation,
+        retryable: true,
+        httpLikeStatus: 413,
+        message: 'The capture exceeds the size budget.',
+      ),
+      ReleaseMcpErrorCode.routeBlocked: ReleaseErrorDescriptor(
+        code: ReleaseMcpErrorCode.routeBlocked,
+        category: ReleaseMcpErrorCategory.permission,
+        retryable: false,
+        httpLikeStatus: 403,
+        message: 'Capture is blocked on this screen by app policy.',
+      ),
+      ReleaseMcpErrorCode.unsupportedFormat: ReleaseErrorDescriptor(
+        code: ReleaseMcpErrorCode.unsupportedFormat,
+        category: ReleaseMcpErrorCategory.validation,
+        retryable: false,
+        httpLikeStatus: 415,
+        message: 'That image format is not available.',
       ),
       ReleaseMcpErrorCode.unknown: ReleaseErrorDescriptor(
         code: ReleaseMcpErrorCode.unknown,

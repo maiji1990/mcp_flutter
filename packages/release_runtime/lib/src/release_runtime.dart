@@ -372,12 +372,12 @@ final class _GuardedToolSurface implements ReleaseToolSurface {
     if (definition == null) {
       return _refusal(ReleaseMcpErrorCode.toolNotFound);
     }
-    if (!_runtime._granted.contains(definition.permission)) {
+    final requiredPermission = definition.permissionFor(arguments);
+    if (requiredPermission != null &&
+        !_runtime._granted.contains(requiredPermission)) {
       return _refusal(
         ReleaseMcpErrorCode.permissionDenied,
-        details: <String, Object?>{
-          'permission': definition.permission.wireName,
-        },
+        details: <String, Object?>{'permission': requiredPermission.wireName},
       );
     }
 

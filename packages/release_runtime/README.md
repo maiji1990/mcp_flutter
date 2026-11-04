@@ -7,11 +7,11 @@ Service. This package is the other half of the story: a guarded MCP surface that
 lives inside a *release* build — loopback HTTP, bearer token, no VM Service, no
 service extensions, no Dart eval, no hot reload.
 
-> **Status: PR-01 … PR-04 of the fork plan.** Configuration, lifecycle, consent,
+> **Status: PR-01 … PR-05 of the fork plan.** Configuration, lifecycle, consent,
 > bearer authentication, the Streamable HTTP endpoint, and three read-only UI
 > tools are implemented and tested. The Flutter side (the actual semantics walk)
 > lives in [`flutter_mcp_toolkit_release_flutter`](../release_runtime_flutter).
-> Capture and app actions are PR-05.
+> Android device verification is PR-06.
 
 ## Why a separate package
 
@@ -59,6 +59,8 @@ A client then talks MCP to `http://127.0.0.1:8765/mcp` with
 | `ui_click` | `ui:interact` | Taps one ref; requires the `snapshotId` that issued it |
 | `ui_set_text` | `ui:interact` | Types into a field; refuses sensitive (password-like) nodes |
 | `ui_scroll` | `ui:interact` | Scrolls a list by direction and amount |
+| `app_invoke_action` | `app:<name>` | Runs a business action the app registered |
+| `ui_capture` | `ui:capture` | PNG screenshot, refused on policy-blocked routes |
 
 Write tools need `ui:interact` **and** the `snapshotId`, are serialized, and
 consume their snapshot: acting twice on one snapshot yields one action and one
@@ -90,8 +92,8 @@ Refusals are `success: false` payloads with stable codes
 ## Verifying it works
 
 ```bash
-dart test packages/release_runtime                    # 108 tests
-flutter test packages/release_runtime_flutter         # 9 widget tests
+dart test packages/release_runtime                    # 133 tests
+flutter test packages/release_runtime_flutter         # 12 widget tests
 dart run packages/release_runtime/example/release_http_smoke.dart
 ```
 

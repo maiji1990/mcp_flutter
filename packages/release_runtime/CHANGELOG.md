@@ -1,3 +1,26 @@
+## 0.5.0 — unreleased (fork)
+
+### Added
+
+- `app_invoke_action`: one tool over the app's registered `ReleaseAppAction`s,
+  each gated by its own `app:<name>` permission. Unknown names are
+  `action_not_found` (the resolver yields no static permission, so the surface
+  answers); throwing handlers become `action_failed` with the exception type
+  only; calls are serialized.
+- `ReleaseToolDefinition.permission` is now optional and can be computed per
+  call with `permissionResolver` / `permissionFor(arguments)`.
+- `ui_capture`: PNG screenshot behind `ui:capture`, a route policy evaluated
+  before capture, and a byte budget. Scale (0.1..3) and format are validated
+  before any UI work.
+- `ReleaseUiCaptureSource` / `ReleaseCaptureRequest` /
+  `ReleaseCaptureResult` / `ReleaseCaptureFormat` / `ReleaseCapturePolicy`.
+- New codes: `action_not_found`, `action_failed`, `capture_unavailable`,
+  `capture_too_large`, `route_blocked`, `unsupported_format`; new
+  `capability` category.
+- Tests: action registry/permissions/serialization, capture policy/budget/
+  validation, and the HTTP round trip for both (permission gate, consent, base64
+  payload).
+
 ## 0.4.0 — unreleased (fork)
 
 ### Added
